@@ -1,0 +1,14 @@
+# PATH: apps/notifications/serializers.py
+
+from rest_framework import serializers
+from .models import Notification
+
+
+class NotificationSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Notification
+        fields = [
+            'id', 'title', 'message', 'type', 'is_read',
+            'sent_via', 'created_at',
+        ]
+        read_only_fields = ['id', 'created_at']

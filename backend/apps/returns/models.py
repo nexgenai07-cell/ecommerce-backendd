@@ -1,0 +1,125 @@
+# PATH: ecommerce/apps/returns/models.py
+# NOTE: This replaces the original models7 file.
+#       Changes from original:
+#       - Return model: added customer ForeignKey, resolved_at field
+#       - Complaint model: added resolved_by ForeignKey, response TextField
+
+from django.db import models
+from django.conf import settings
+
+
+class Return(models.Model):
+    """
+    Customer return requests for delivered orders.
+    Only delivered orders can have return requests.
+    customer field added for direct link without going through order.
+    resolved_at tracks when the return was completed.
+    """
+
+    STATUS_CHOICES = [
+        ('requested',  'Requested'),
+        ('approved',   'Approved'),
+        ('rejected',   'Rejected'),
+        ('completed',  'Completed'),
+    ]
+
+    order       = models.ForeignKey(
+                    'orders.Order',
+                    on_delete=models.CASCADE,
+                    related_name='returns',
+                  )
+    customer    = models.ForeignKey(
+                    'orders.Customer',
+                    on_delete=models.CASCADE,
+                    related_name='returns',
+                    null=True,
+                    blank=True,
+                    help_text='Direct link to customer — auto-filled from order on save'
+                  )
+    reason      = models.TextField()
+    status      = models.CharField(
+                    max_length=20,
+                    choices=STATUS_CHOICES,
+                    default='requested',
+                  )
+    resolved_at = models.DateTimeField(
+                    null=True,
+                    blank=True,
+                    help_text='Timestamp when status changed to approved/rejected/completed'
+                  )
+    created_at  = models.DateTimeField(auto_now_add=True)
+    updated_at  = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'returns'
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f'Return for {self.order.order_number}'
+
+    def save(self, *args, **kwargs):
+        # Auto-fill customer from order
+        if not self.customer and self.order:
+            self.customer = self.order.customer
+        super().save(*args, **kwargs)
+
+
+class Complaint(models.Model):
+    """
+    Customer complaints linked to orders or general issues.
+    resolved_by tracks which admin resolved the complaint.
+    response stores the admin's reply to the customer.
+    """
+
+    STATUS_CHOICES = [
+        ('open',        'Open'),
+        ('in_progress', 'In Progress'),
+        ('resolved',    'Resolved'),
+        ('closed',      'Closed'),
+    ]
+
+    TYPE_CHOICES = [
+        ('order',    'Order Issue'),
+        ('payment',  'Payment Issue'),
+        ('product',  'Product Issue'),
+        ('delivery', 'Delivery Issue'),
+        ('other',    'Other'),
+    ]
+
+    customer    = models.ForeignKey(
+                    'orders.Customer',
+                    on_delete=models.CASCADE,
+                    related_name='complaints',
+                  )
+    order       = models.ForeignKey(
+                    'orders.Order',
+                    on_delete=models.SET_NULL,
+                    null=True,
+                    blank=True,
+                    related_name='complaints',
+                  )
+    message     = models.TextField()
+    type        = models.CharField(max_length=20, choices=TYPE_CHOICES, default='other')
+    status      = models.CharField(max_length=20, choices=STATUS_CHOICES, default='open')
+    response    = models.TextField(
+                    null=True,
+                    blank=True,
+                    help_text='Admin response to the customer complaint'
+                  )
+    resolved_by = models.ForeignKey(
+                    settings.AUTH_USER_MODEL,
+                    on_delete=models.SET_NULL,
+                    null=True,
+                    blank=True,
+                    related_name='resolved_complaints',
+                    help_text='Admin who resolved this complaint'
+                  )
+    created_at  = models.DateTimeField(auto_now_add=True)
+    updated_at  = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'complaints'
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f'Complaint by {self.customer.name} [{self.status}]'

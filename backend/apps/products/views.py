@@ -1,0 +1,184 @@
+# PATH: apps/products/views.py
+
+from rest_framework import viewsets, permissions, status, filters
+from rest_framework.decorators import action
+from rest_framework.response import Response
+from rest_framework.parsers import MultiPartParser, FormParser
+from django.db.models import Q
+
+from .models import Product, ProductImage, ProductHistory
+from .serializers import (
+    ProductListSerializer,
+    ProductDetailSerializer,
+    ProductCreateUpdateSerializer,
+    ProductImageSerializer,
+)
+from apps.users.permissions import IsAdmin
+
+
+class ProductViewSet(viewsets.ModelViewSet):
+    """
+    GET    /api/v1/products/             -> list (anyone)
+    POST   /api/v1/products/             -> create (admin only)
+    GET    /api/v1/products/{id}/        -> retrieve (anyone)
+    PUT    /api/v1/products/{id}/        -> update (admin only)
+    DELETE /api/v1/products/{id}/        -> soft delete (admin only)
+
+    GET    /api/v1/products/search/      -> filtered search (anyone)
+    GET    /api/v1/products/low-stock/   -> below threshold (admin only)
+
+    POST   /api/v1/products/{id}/images/                       -> add image (admin only)
+    DELETE /api/v1/products/{id}/images/{image_id}/             -> remove image (admin only)
+    PUT    /api/v1/products/{id}/images/{image_id}/set-primary/ -> set primary (admin only)
+    """
+    filter_backends = [filters.SearchFilter]
+    search_fields = ['name', 'description']
+
+    def get_queryset(self):
+        qs = Product.objects.select_related('category').prefetch_related('images')
+        if self.action in ['list', 'retrieve', 'search']:
+            # Customers should only ever see active products
+            if not (self.request.user.is_authenticated and self.request.user.role == 'admin'):
+                qs = qs.filter(is_active=True)
+        return qs
+
+    def get_serializer_class(self):
+        if self.action == 'list' or self.action == 'search':
+            return ProductListSerializer
+        if self.action in ['create', 'update', 'partial_update']:
+            return ProductCreateUpdateSerializer
+        return ProductDetailSerializer
+
+    def get_permissions(self):
+        if self.action in ['list', 'retrieve', 'search']:
+            return [permissions.AllowAny()]
+        return [permissions.IsAuthenticated(), IsAdmin()]
+
+    def perform_destroy(self, instance):
+        # Soft delete — data is never actually removed
+        instance.is_active = False
+        instance.save()
+
+    def update(self, request, *args, **kwargs):
+        """Override to auto-create ProductHistory when price/stock change"""
+        instance = self.get_object()
+        old_price = instance.price
+        old_stock = instance.stock
+
+        response = super().update(request, *args, **kwargs)
+
+        instance.refresh_from_db()
+        if instance.price != old_price or instance.stock != old_stock:
+            ProductHistory.objects.create(
+                product=instance,
+                changed_by=request.user,
+                old_price=old_price,
+                new_price=instance.price,
+                old_stock=old_stock,
+                new_stock=instance.stock,
+                reason='Manual update via admin panel',
+            )
+
+        return response
+
+    @action(detail=False, methods=['get'], url_path='search')
+    def search(self, request):
+        """
+        GET /api/v1/products/search/?q=phone&category=1&min_price=1000&max_price=50000&in_stock=true
+        """
+        qs = self.get_queryset()
+
+        q = request.query_params.get('q')
+        if q:
+            qs = qs.filter(Q(name__icontains=q) | Q(description__icontains=q))
+
+        category = request.query_params.get('category')
+        if category:
+            qs = qs.filter(category_id=category)
+
+        min_price = request.query_params.get('min_price')
+        if min_price:
+            qs = qs.filter(price__gte=min_price)
+
+        max_price = request.query_params.get('max_price')
+        if max_price:
+            qs = qs.filter(price__lte=max_price)
+
+        in_stock = request.query_params.get('in_stock')
+        if in_stock == 'true':
+            qs = qs.filter(stock__gt=0)
+
+        serializer = ProductListSerializer(qs, many=True)
+        return Response(serializer.data)
+
+    @action(detail=False, methods=['get'], url_path='low-stock',
+            permission_classes=[permissions.IsAuthenticated, IsAdmin])
+    def low_stock(self, request):
+        """GET /api/v1/products/low-stock/ — products at or below their threshold"""
+        qs = Product.objects.filter(is_active=True)
+
+        # Compare stock vs threshold in Python (clear and simple for small catalogs)
+        low_stock_products = [p for p in qs if p.stock <= p.low_stock_threshold]
+        serializer = ProductListSerializer(low_stock_products, many=True)
+        return Response(serializer.data)
+
+    @action(detail=True, methods=['post'], url_path='images',
+            permission_classes=[permissions.IsAuthenticated, IsAdmin],
+            parser_classes=[MultiPartParser, FormParser])
+    def upload_image(self, request, pk=None):
+        """POST /api/v1/products/{id}/images/ — multipart form, field name: image"""
+        product = self.get_object()
+        image_file = request.FILES.get('image')
+
+        if not image_file:
+            return Response({'error': 'No image file provided.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        is_first_image = not product.images.exists()
+        product_image = ProductImage.objects.create(
+            product=product,
+            image=image_file,
+            is_primary=is_first_image,  # first uploaded image becomes primary automatically
+        )
+
+        return Response(
+            ProductImageSerializer(product_image, context={'request': request}).data,
+            status=status.HTTP_201_CREATED,
+        )
+
+    @action(detail=True, methods=['delete'], url_path='images/(?P<image_id>[^/.]+)',
+            permission_classes=[permissions.IsAuthenticated, IsAdmin])
+    def delete_image(self, request, pk=None, image_id=None):
+        """DELETE /api/v1/products/{id}/images/{image_id}/"""
+        product = self.get_object()
+        try:
+            image = product.images.get(id=image_id)
+        except ProductImage.DoesNotExist:
+            return Response({'error': 'Image not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+        was_primary = image.is_primary
+        image.delete()
+
+        # If we deleted the primary image, promote another one automatically
+        if was_primary:
+            next_image = product.images.first()
+            if next_image:
+                next_image.is_primary = True
+                next_image.save()
+
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+    @action(detail=True, methods=['put'], url_path='images/(?P<image_id>[^/.]+)/set-primary',
+            permission_classes=[permissions.IsAuthenticated, IsAdmin])
+    def set_primary_image(self, request, pk=None, image_id=None):
+        """PUT /api/v1/products/{id}/images/{image_id}/set-primary/"""
+        product = self.get_object()
+        try:
+            image = product.images.get(id=image_id)
+        except ProductImage.DoesNotExist:
+            return Response({'error': 'Image not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+        product.images.update(is_primary=False)
+        image.is_primary = True
+        image.save()
+
+        return Response(ProductImageSerializer(image).data)
