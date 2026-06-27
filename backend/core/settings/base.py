@@ -33,9 +33,6 @@ ALLOWED_HOSTS = ['*']
 # -------------------------------------------------
 
 INSTALLED_APPS = [
-    # IMPORTANT: daphne must be first
-    'daphne',
-
     # Django default apps
     'django.contrib.admin',
     'django.contrib.auth',
@@ -49,7 +46,9 @@ INSTALLED_APPS = [
     'rest_framework_simplejwt',
     'rest_framework_simplejwt.token_blacklist',
     'corsheaders',
-    'channels',
+    # NOTE: 'daphne' and 'channels' removed here — Vercel serverless
+    # does not support long-running ASGI processes. These will be added
+    # back when the project moves to Railway/Render for WebSocket support.
 
     # Local apps
     'apps.users',
@@ -104,7 +103,7 @@ TEMPLATES = [
 ]
 
 WSGI_APPLICATION = 'core.wsgi.application'
-ASGI_APPLICATION = 'core.asgi.application'
+# ASGI_APPLICATION = 'core.asgi.application'  # enabled when moving to Railway/Render
 
 # -------------------------------------------------
 # DATABASE (POSTGRESQL)
@@ -119,7 +118,7 @@ DATABASES = {
         "HOST": os.getenv("DB_HOST"),
         "PORT": os.getenv("DB_PORT", "5432"),
         "OPTIONS": {
-            "sslmode": os.getenv("DB_SSLMODE", "require"),
+            "sslmode": "require",
         },
     }
 }
@@ -214,12 +213,26 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 # CACHE (Redis)
 # -------------------------------------------------
 
-CACHES = {
-    "default": {
-        "BACKEND": "django.core.cache.backends.redis.RedisCache",
-        "LOCATION": os.getenv(
-            "REDIS_URL",
-            "rediss://localhost:6379/1"
-        ),
+# -------------------------------------------------
+# CACHE
+# Redis agar available ho toh use karo (production server pe),
+# warna DummyCache — Vercel pe Redis nahi hota, is wajah se
+# REDIS_URL na hone pe server crash karta tha.
+# -------------------------------------------------
+
+REDIS_URL = os.getenv("REDIS_URL", "")
+
+if REDIS_URL:
+    CACHES = {
+        "default": {
+            "BACKEND": "django.core.cache.backends.redis.RedisCache",
+            "LOCATION": REDIS_URL,
+        }
     }
-}
+else:
+    # DummyCache — caching nahi hogi lekin server crash nahi karega
+    CACHES = {
+        "default": {
+            "BACKEND": "django.core.cache.backends.dummy.DummyCache",
+        }
+    }
