@@ -28,6 +28,8 @@ DEBUG = os.getenv('DEBUG', 'True') == 'True'
 
 ALLOWED_HOSTS = ['*']
 
+EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
+
 # -------------------------------------------------
 # APPS
 # -------------------------------------------------

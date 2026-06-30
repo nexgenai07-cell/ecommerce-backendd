@@ -3,7 +3,7 @@
 from rest_framework import serializers
 from django.contrib.auth import authenticate
 from django.contrib.auth.password_validation import validate_password
-from .models import User
+from .models import User, UserSession
 
 
 class RegisterSerializer(serializers.ModelSerializer):
@@ -66,9 +66,10 @@ class UserProfileSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = User
-        fields = ['id', 'name', 'email', 'phone', 'role', 'created_at']
-        read_only_fields = ['id', 'email', 'role', 'created_at']
-        # email and role cannot be changed by the user themselves
+        fields = ['id', 'name', 'email', 'phone', 'role', 'email_verified', 'created_at']
+        read_only_fields = ['id', 'email', 'role', 'email_verified', 'created_at']
+        # email and role cannot be changed by the user themselves;
+        # email_verified can only flip via the verify-email/ endpoint
 
 
 class PasswordResetRequestSerializer(serializers.Serializer):
@@ -93,3 +94,48 @@ class PasswordResetConfirmSerializer(serializers.Serializer):
         if data['new_password'] != data['confirm_password']:
             raise serializers.ValidationError({'confirm_password': 'Passwords do not match.'})
         return data
+
+
+class ChangePasswordSerializer(serializers.Serializer):
+    """
+    Used by ChangePasswordView.
+    current_password is checked against the logged-in user's saved (hashed) password.
+    """
+    current_password = serializers.CharField(write_only=True)
+    new_password = serializers.CharField(write_only=True, validators=[validate_password])
+
+    def validate_current_password(self, value):
+        user = self.context['request'].user
+        if not user.check_password(value):
+            # check_password() safely compares the plain text input against
+            # the hashed password stored in the database — this is the
+            # standard, secure way to verify a password in Django.
+            raise serializers.ValidationError('Current password is incorrect.')
+        return value
+
+    def validate(self, data):
+        if data['current_password'] == data['new_password']:
+            raise serializers.ValidationError({
+                'new_password': 'New password must be different from the current password.'
+            })
+        return data
+
+
+class DeleteAccountSerializer(serializers.Serializer):
+    """Requires the user's password as confirmation before deleting — prevents
+    accidental deletion or deletion by someone who briefly has device access."""
+    password = serializers.CharField(write_only=True)
+
+    def validate_password(self, value):
+        user = self.context['request'].user
+        if not user.check_password(value):
+            raise serializers.ValidationError('Incorrect password.')
+        return value
+
+
+class UserSessionSerializer(serializers.ModelSerializer):
+    """Used by GET /sessions/ to list a user's active logins (devices/browsers)."""
+
+    class Meta:
+        model = UserSession
+        fields = ['id', 'device', 'browser', 'location', 'ip_address', 'last_active', 'created_at']
