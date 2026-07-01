@@ -30,23 +30,27 @@ ALLOWED_HOSTS = ['*']
 
 # -------------------------------------------------
 # EMAIL
-# Real email bhejne ke liye SMTP backend (Gmail). Agar EMAIL_HOST_USER
-# set nahi hai (local development mein), to console backend use hoga —
-# taake local testing ke waqt inbox spam na ho.
 # -------------------------------------------------
-
+# FIX: EMAIL_BACKEND pehle hardcoded 'console.EmailBackend' tha, jo emails
+# ko sirf server logs mein print karta hai — kabhi kisi ke inbox mein nahi
+# jaate. .env mein already sahi Gmail SMTP credentials maujood hain, lekin
+# wo kahin read hi nahi ho rahe the. Ab EMAIL_BACKEND aur baaki SMTP settings
+# .env se aa rahi hain. Agar .env mein EMAIL_BACKEND set nahi hai, to dev
+# ke liye console backend pe hi fallback hoga (taake local testing na tootay).
+EMAIL_BACKEND = os.getenv('EMAIL_BACKEND', 'django.core.mail.backends.console.EmailBackend')
+EMAIL_HOST = os.getenv('EMAIL_HOST', '')
+EMAIL_PORT = int(os.getenv('EMAIL_PORT', 587))
+EMAIL_USE_TLS = os.getenv('EMAIL_USE_TLS', 'True') == 'True'
 EMAIL_HOST_USER = os.getenv('EMAIL_HOST_USER', '')
+EMAIL_HOST_PASSWORD = os.getenv('EMAIL_HOST_PASSWORD', '')
+DEFAULT_FROM_EMAIL = os.getenv('DEFAULT_FROM_EMAIL', 'noreply@example.com')
 
-if EMAIL_HOST_USER:
-    EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
-    EMAIL_HOST = os.getenv('EMAIL_HOST', 'smtp.gmail.com')
-    EMAIL_PORT = int(os.getenv('EMAIL_PORT', '587'))
-    EMAIL_USE_TLS = True
-    EMAIL_HOST_PASSWORD = os.getenv('EMAIL_HOST_PASSWORD', '')  # Gmail App Password (16-digit)
-    DEFAULT_FROM_EMAIL = os.getenv('DEFAULT_FROM_EMAIL', EMAIL_HOST_USER)
-else:
-    # fallback — local dev mein email terminal pe print hogi
-    EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
+# FIX: verification/reset links poore project mein hardcoded
+# 'http://localhost:5173/...' the — production mein galat domain pe
+# point karte. Ab ek hi jagah se control hota hai. .env mein
+# FRONTEND_URL=https://your-real-frontend-domain.com set kar dena
+# production ke liye; dev ke liye localhost pe hi fallback rahega.
+FRONTEND_URL = os.getenv('FRONTEND_URL', 'http://localhost:5173')
 
 # -------------------------------------------------
 # APPS
@@ -171,6 +175,14 @@ REST_FRAMEWORK = {
     'DEFAULT_PERMISSION_CLASSES': (
         'rest_framework.permissions.IsAuthenticatedOrReadOnly',
     ),
+    # NOTE: DEFAULT_PAGINATION_CLASS jaan-bujh kar yahan GLOBALLY set nahi
+    # ki gayi. API doc mein sirf kuch specific endpoints (Products list/
+    # search, My Orders, Admin Orders, Admin Orders filter) {count, next,
+    # previous, results} shape promise karte hain — baaki (Categories,
+    # Discounts, Returns, Complaints, Notifications, etc.) plain array
+    # promise karte hain. Isliye pagination_class un views mein manually
+    # laga di gayi hai (dekho core/pagination.py), globally nahi — warna
+    # sab "sahi" plain-array endpoints bhi zabardasti wrap ho jate.
 }
 
 # -------------------------------------------------

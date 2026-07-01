@@ -14,6 +14,7 @@ from .serializers import (
     ProductImageSerializer,
 )
 from apps.users.permissions import IsAdmin
+from core.pagination import StandardResultsPagination
 
 
 class ProductViewSet(viewsets.ModelViewSet):
@@ -33,6 +34,14 @@ class ProductViewSet(viewsets.ModelViewSet):
     """
     filter_backends = [filters.SearchFilter]
     search_fields = ['name', 'description']
+    # FIX: pagination_class add ki gayi — pehle koi pagination class kahin
+    # set nahi thi (na globally, na yahan), isliye GET /products/ plain
+    # array bhejta tha jab ke doc {count, next, previous, results} promise
+    # karta hai. Ye standard list() action (list/retrieve/create/update/
+    # destroy) ke liye hai — @action se bane custom endpoints (search,
+    # low-stock) is class ko automatically use nahi karte, unhe neeche
+    # manually paginate_queryset() call karke lagaya gaya hai.
+    pagination_class = StandardResultsPagination
 
     def get_queryset(self):
         qs = Product.objects.select_related('category').prefetch_related('images')
@@ -84,7 +93,19 @@ class ProductViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=['get'], url_path='search')
     def search(self, request):
         """
-        GET /api/v1/products/search/?q=phone&category=1&min_price=1000&max_price=50000&in_stock=true
+        GET /api/v1/products/search/?q=phone&category_id=1&min_price=1000&max_price=50000&in_stock=true&ordering=-created_at&page=1
+
+        FIXES applied here (Bug Report — /api/v1/products/search/):
+          1. category_id — was reading request.query_params.get('category')
+             (missing '_id'), so the frontend's ?category_id=6 was NEVER
+             read and the filter never applied. Fixed to read 'category_id'.
+          2. ordering — was not handled at all despite being a documented
+             query param; now applies it via .order_by(), with a safe
+             whitelist so random field names can't be passed in.
+          3. pagination — was returning a plain array via
+             Response(serializer.data); now uses paginate_queryset() /
+             get_paginated_response() so the shape matches the documented
+             {count, next, previous, results}, same as the standard list().
         """
         qs = self.get_queryset()
 
@@ -92,9 +113,10 @@ class ProductViewSet(viewsets.ModelViewSet):
         if q:
             qs = qs.filter(Q(name__icontains=q) | Q(description__icontains=q))
 
-        category = request.query_params.get('category')
-        if category:
-            qs = qs.filter(category_id=category)
+        # FIX (Bug 1): 'category_id' ab sahi se padha ja raha hai.
+        category_id = request.query_params.get('category_id')
+        if category_id:
+            qs = qs.filter(category_id=category_id)
 
         min_price = request.query_params.get('min_price')
         if min_price:
@@ -107,6 +129,25 @@ class ProductViewSet(viewsets.ModelViewSet):
         in_stock = request.query_params.get('in_stock')
         if in_stock == 'true':
             qs = qs.filter(stock__gt=0)
+
+        # FIX: 'ordering' param ab handle ho raha hai (pehle ignore hota tha).
+        # Sirf inhi fields pe ordering allow hai — kisi bhi arbitrary column
+        # name se sort karne ki request ko silently ignore kar dete hain
+        # taake koi unexpected DB error na aaye.
+        allowed_ordering_fields = {
+            'created_at', '-created_at',
+            'price', '-price',
+            'name', '-name',
+        }
+        ordering = request.query_params.get('ordering')
+        if ordering in allowed_ordering_fields:
+            qs = qs.order_by(ordering)
+
+        # FIX (Bug 2): pagination ab standard list() jaisi hi hai.
+        page = self.paginate_queryset(qs)
+        if page is not None:
+            serializer = ProductListSerializer(page, many=True)
+            return self.get_paginated_response(serializer.data)
 
         serializer = ProductListSerializer(qs, many=True)
         return Response(serializer.data)

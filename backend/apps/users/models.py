@@ -82,6 +82,13 @@ class UserSession(models.Model):
     """
     user           = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='sessions')
     refresh_jti    = models.CharField(max_length=255, unique=True, help_text='JWT ID of the refresh token for this session')
+    # FIX: added so GET /sessions/ can tell the frontend WHICH row is the
+    # session currently being used to make the request (doc requires an
+    # "is_current" field, which was missing entirely before). We store the
+    # ACCESS token's jti (not the refresh token's) because the request that
+    # calls /sessions/ only carries an access token, and we compare against
+    # this at read time in UserSessionSerializer.
+    access_jti     = models.CharField(max_length=255, blank=True, default='', help_text='JWT ID of the access token issued at the same login, used to detect the current session')
     device         = models.CharField(max_length=255, blank=True, default='Unknown device')
     browser        = models.CharField(max_length=100, blank=True, default='Unknown browser')
     ip_address     = models.GenericIPAddressField(null=True, blank=True)

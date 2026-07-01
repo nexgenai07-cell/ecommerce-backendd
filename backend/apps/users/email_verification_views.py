@@ -28,16 +28,17 @@ class SendVerificationEmailView(APIView):
 
         verification = EmailVerification.create_for_user(user)
 
-        # Same pattern as password reset — points to a frontend page that
-        # will read the token from the URL and call the GET endpoint below
-        verify_link = f'http://localhost:5173/verify-email/{verification.token}/'
+        # FIX: was hardcoded to 'http://localhost:5173/...' — now reads
+        # settings.FRONTEND_URL (from .env), so this works correctly in
+        # production too, not just on your local dev machine.
+        verify_link = f'{settings.FRONTEND_URL}/verify-email/{verification.token}/'
 
         send_mail(
             subject='Verify your email address',
             message=f'Click the link to verify your email: {verify_link}\n\nThis link is valid for 24 hours.',
-            from_email=getattr(settings, 'DEFAULT_FROM_EMAIL', 'noreply@example.com'),
+            from_email=settings.DEFAULT_FROM_EMAIL,
             recipient_list=[user.email],
-            fail_silently=False,  # TEMP: False taake Vercel logs mein asal error dikhe (debugging)
+            fail_silently=True,
         )
 
         return Response(

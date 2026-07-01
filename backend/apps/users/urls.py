@@ -16,7 +16,7 @@ from .views import (
     SessionListView,
     RevokeAllSessionsView,
 )
-from .twofactor_views import Enable2FAView, Verify2FAView, Disable2FAView
+from .twofactor_views import Enable2FAView, Verify2FAView, Disable2FAView, TwoFactorLoginVerifyView
 from .email_verification_views import SendVerificationEmailView, VerifyEmailView
 
 urlpatterns = [
@@ -40,6 +40,9 @@ urlpatterns = [
     path('2fa/enable/', Enable2FAView.as_view(), name='2fa_enable'),
     path('2fa/verify/', Verify2FAView.as_view(), name='2fa_verify'),
     path('2fa/disable/', Disable2FAView.as_view(), name='2fa_disable'),
+    # FIX (NEW): completes the login flow when 2FA is enabled — see
+    # TwoFactorLoginVerifyView docstring for the full flow explanation.
+    path('2fa/login-verify/', TwoFactorLoginVerifyView.as_view(), name='2fa_login_verify'),
 
     # Email Verification
     path('send-verification-email/', SendVerificationEmailView.as_view(), name='send_verification_email'),

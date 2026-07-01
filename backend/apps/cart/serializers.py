@@ -5,26 +5,49 @@ from .models import Cart, CartItem
 from apps.products.models import Product
 
 
+class CartProductSerializer(serializers.ModelSerializer):
+    """
+    NEW — small nested product summary used inside cart items.
+    FIX: doc documents cart items as
+      { "id":1, "product": {"id":1,"name":"","price":"","primary_image":"","stock":50}, ... }
+    but 'product' was previously just a raw product ID (DRF's default
+    PrimaryKeyRelatedField), with name/price/image/stock scattered as
+    separate flat fields (product_name, product_price, ...) instead.
+    Frontend code written against the documented shape (item.product.name,
+    item.product.price, etc.) would get "undefined" for all of these.
+    """
+    primary_image = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Product
+        fields = ['id', 'name', 'price', 'primary_image', 'stock']
+
+    def get_primary_image(self, obj):
+        img = obj.primary_image
+        return img.image_url if img else None
+
+
 class CartItemSerializer(serializers.ModelSerializer):
-    product_name = serializers.CharField(source='product.name', read_only=True)
-    product_price = serializers.DecimalField(source='product.price', max_digits=10, decimal_places=2, read_only=True)
-    product_image = serializers.SerializerMethodField()
-    product_stock = serializers.IntegerField(source='product.stock', read_only=True)
-    subtotal = serializers.SerializerMethodField()
+    # FIX: 'product' is now the nested object described above, instead of
+    # a bare ID.
+    product = CartProductSerializer(read_only=True)
+    # FIX: renamed from 'subtotal' to 'total_price' to match the documented
+    # field name exactly (API 32 — Get Cart).
+    total_price = serializers.SerializerMethodField()
 
     class Meta:
         model = CartItem
-        fields = [
-            'id', 'product', 'product_name', 'product_price',
-            'product_image', 'product_stock', 'quantity', 'subtotal', 'created_at',
-        ]
+        fields = ['id', 'product', 'quantity', 'total_price', 'created_at']
 
-    def get_product_image(self, obj):
-        img = obj.product.primary_image
-        return img.image_url if img else None
-
-    def get_subtotal(self, obj):
+    def get_total_price(self, obj):
         return obj.product.price * obj.quantity
+
+
+class CartCouponSerializer(serializers.Serializer):
+    """NEW — small nested coupon summary, used instead of a bare coupon_code string."""
+    code = serializers.CharField()
+    type = serializers.CharField()
+    value = serializers.DecimalField(max_digits=10, decimal_places=2)
 
 
 class CartSerializer(serializers.ModelSerializer):
@@ -32,11 +55,15 @@ class CartSerializer(serializers.ModelSerializer):
     subtotal = serializers.SerializerMethodField()
     discount_amount = serializers.SerializerMethodField()
     total = serializers.SerializerMethodField()
-    coupon_code = serializers.CharField(source='coupon.code', read_only=True, default=None)
+    # FIX: doc's Get Cart response has "coupon": null (or a coupon object
+    # when applied) — the field was previously named 'coupon_code' and was
+    # just a plain string, not the documented shape. Now it's a proper
+    # nested object (or null when no coupon is applied).
+    coupon = serializers.SerializerMethodField()
 
     class Meta:
         model = Cart
-        fields = ['id', 'items', 'coupon_code', 'subtotal', 'discount_amount', 'total', 'created_at', 'updated_at']
+        fields = ['id', 'items', 'coupon', 'subtotal', 'discount_amount', 'total', 'created_at', 'updated_at']
 
     def get_subtotal(self, obj):
         return sum(item.product.price * item.quantity for item in obj.items.all())
@@ -53,6 +80,11 @@ class CartSerializer(serializers.ModelSerializer):
 
     def get_total(self, obj):
         return self.get_subtotal(obj) - self.get_discount_amount(obj)
+
+    def get_coupon(self, obj):
+        if not obj.coupon:
+            return None
+        return CartCouponSerializer(obj.coupon).data
 
 
 class AddToCartSerializer(serializers.Serializer):

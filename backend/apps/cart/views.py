@@ -4,6 +4,7 @@ from rest_framework import status, permissions
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from django.utils import timezone
+from django.db.models import Sum
 
 from .models import Cart, CartItem
 from .serializers import (
@@ -56,7 +57,15 @@ class AddToCartView(APIView):
             cart_item.quantity = new_quantity
             cart_item.save()
 
-        return Response(CartSerializer(cart).data, status=status.HTTP_200_OK)
+        # FIX: was returning the ENTIRE cart object. Doc (API 33) says the
+        # response should be { "message": "...", "cart_total_items": N } —
+        # "cart_total_items" is what the frontend uses to update the cart
+        # icon badge, and it did not exist anywhere in the old response.
+        cart_total_items = cart.items.aggregate(total=Sum('quantity'))['total'] or 0
+        return Response({
+            'message': 'Product added to cart.',
+            'cart_total_items': cart_total_items,
+        }, status=status.HTTP_200_OK)
 
 
 class UpdateCartItemView(APIView):
@@ -74,13 +83,21 @@ class UpdateCartItemView(APIView):
         serializer.is_valid(raise_exception=True)
         quantity = serializer.validated_data['quantity']
 
+        # FIX: was returning the ENTIRE cart object. Doc (API 34) says the
+        # response should be { "message": "...", "item_total": "..." } —
+        # "item_total" did not exist anywhere in the old response.
         if quantity == 0:
             cart_item.delete()
-        else:
-            cart_item.quantity = quantity
-            cart_item.save()
+            return Response({'message': 'Cart updated.', 'item_total': '0.00'}, status=status.HTTP_200_OK)
 
-        return Response(CartSerializer(cart).data)
+        cart_item.quantity = quantity
+        cart_item.save()
+        item_total = cart_item.product.price * cart_item.quantity
+
+        return Response({
+            'message': 'Cart updated.',
+            'item_total': str(item_total),
+        }, status=status.HTTP_200_OK)
 
 
 class RemoveCartItemView(APIView):
@@ -95,7 +112,9 @@ class RemoveCartItemView(APIView):
             return Response({'error': 'Cart item not found.'}, status=status.HTTP_404_NOT_FOUND)
 
         cart_item.delete()
-        return Response(CartSerializer(cart).data)
+        # FIX: was returning the ENTIRE cart object; doc (API 35) only
+        # documents { "message": "Item removed from cart." }.
+        return Response({'message': 'Item removed from cart.'}, status=status.HTTP_200_OK)
 
 
 class ClearCartView(APIView):
@@ -140,7 +159,14 @@ class ApplyCouponView(APIView):
         cart.coupon = discount
         cart.save()
 
-        return Response(CartSerializer(cart).data)
+        # FIX: was returning the ENTIRE cart object. Doc (API 37) says the
+        # response should be { "message": "...", "discount_amount": "...", "total": "..." }.
+        cart_serializer = CartSerializer(cart)
+        return Response({
+            'message': 'Coupon applied.',
+            'discount_amount': str(cart_serializer.get_discount_amount(cart)),
+            'total': str(cart_serializer.get_total(cart)),
+        }, status=status.HTTP_200_OK)
 
 
 class RemoveCouponView(APIView):
@@ -151,4 +177,6 @@ class RemoveCouponView(APIView):
         cart = get_or_create_cart(request.user)
         cart.coupon = None
         cart.save()
-        return Response(CartSerializer(cart).data)
+        # FIX: was returning the ENTIRE cart object; doc (API 38) only
+        # documents { "message": "Coupon removed." }.
+        return Response({'message': 'Coupon removed.'}, status=status.HTTP_200_OK)

@@ -136,6 +136,24 @@ class DeleteAccountSerializer(serializers.Serializer):
 class UserSessionSerializer(serializers.ModelSerializer):
     """Used by GET /sessions/ to list a user's active logins (devices/browsers)."""
 
+    # FIX: "is_current" field ADD kiya gaya — pehle ye field exist hi nahi
+    # karta tha, jab ke Requirements doc ke sample response mein
+    # "is_current": true documented hai. Frontend isi field se batata hai
+    # ke kaunsa device "this device" hai (jise sign-out button na dikhaye).
+    # Current session ka pata request ke access token ke jti se chalta hai
+    # (dekho views.py -> SessionListView / create_session_record).
+    is_current = serializers.SerializerMethodField()
+
     class Meta:
         model = UserSession
-        fields = ['id', 'device', 'browser', 'location', 'ip_address', 'last_active', 'created_at']
+        fields = ['id', 'device', 'browser', 'location', 'ip_address', 'is_current', 'last_active', 'created_at']
+
+    def get_is_current(self, obj):
+        request = self.context.get('request')
+        if not request or not getattr(request, 'auth', None):
+            return False
+        try:
+            current_access_jti = str(request.auth['jti'])
+        except (KeyError, TypeError):
+            return False
+        return obj.access_jti == current_access_jti

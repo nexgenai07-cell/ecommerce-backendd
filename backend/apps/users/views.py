@@ -12,7 +12,7 @@ from django.core.mail import send_mail
 from django.conf import settings
 from user_agents import parse as parse_user_agent
 
-from .models import User, UserSession, EmailVerification
+from .models import User, UserSession, EmailVerification, TwoFactorAuth
 from .serializers import (
     RegisterSerializer,
     LoginSerializer,
@@ -42,11 +42,15 @@ def get_client_ip(request):
     return request.META.get('REMOTE_ADDR')
 
 
-def create_session_record(request, user, refresh_token):
+def create_session_record(request, user, refresh_token, access_token=None):
     """
-    Called once at login. Parses the browser's User-Agent header to get a
-    human-readable device/browser name, and stores the refresh token's jti
-    (its unique ID) so this specific session can be revoked later.
+    Called once at login (both normal login, and 2FA-verified login).
+    Parses the browser's User-Agent header to get a human-readable
+    device/browser name, and stores:
+      - the refresh token's jti, so this specific session can be revoked later
+      - the access token's jti, so GET /sessions/ can mark this row as
+        "is_current" the next time a request comes in using this same
+        access token (FIX — see UserSessionSerializer for the other half)
     """
     ua_string = request.META.get('HTTP_USER_AGENT', '')
     ua = parse_user_agent(ua_string)
@@ -57,6 +61,7 @@ def create_session_record(request, user, refresh_token):
     UserSession.objects.create(
         user=user,
         refresh_jti=str(refresh_token['jti']),
+        access_jti=str(access_token['jti']) if access_token is not None else '',
         device=device,
         browser=browser,
         ip_address=get_client_ip(request),
@@ -67,14 +72,17 @@ def create_session_record(request, user, refresh_token):
 def send_verification_email(user):
     """Shared helper — called both at registration and from the resend endpoint"""
     verification = EmailVerification.create_for_user(user)
-    verify_link = f'http://localhost:5173/verify-email/{verification.token}/'
+    # FIX: link was hardcoded to 'http://localhost:5173/...' — now uses
+    # settings.FRONTEND_URL (comes from .env), so production emails point
+    # to the real deployed frontend instead of a dev-only localhost URL.
+    verify_link = f'{settings.FRONTEND_URL}/verify-email/{verification.token}/'
 
     send_mail(
         subject='Verify your email address',
         message=f'Click the link to verify your email: {verify_link}\n\nThis link is valid for 24 hours.',
-        from_email=getattr(settings, 'DEFAULT_FROM_EMAIL', 'noreply@example.com'),
+        from_email=settings.DEFAULT_FROM_EMAIL,
         recipient_list=[user.email],
-        fail_silently=False,  # TEMP: False taake Vercel logs mein asal error dikhe (debugging)
+        fail_silently=True,  # registration/resend should never crash because email sending failed
     )
 
 
@@ -112,6 +120,15 @@ class LoginView(APIView):
     POST /api/v1/auth/login/
     Also creates a UserSession row on every successful login, so the
     "Active Sessions" feature has real data to show (device, browser, IP).
+
+    FIX — 2FA WIRING: pehle ye view 2FA ko bilkul check hi nahi karta tha —
+    2fa/enable + 2fa/verify se DB mein TwoFactorAuth.is_enabled=True ho
+    jata tha, lekin login yahan seedha tokens de deta tha, OTP kabhi
+    manga hi nahi jata tha. Ab agar user ka 2FA enabled hai, tokens turant
+    NAHI diye jate — sirf {"require_2fa": true} response milta hai, aur
+    frontend ko phir /api/v1/auth/2fa/login-verify/ (naya endpoint, dekho
+    twofactor_views.py -> TwoFactorLoginVerifyView) call karna hota hai
+    OTP ke sath tabhi asal tokens milte hain.
     """
     permission_classes = [permissions.AllowAny]
 
@@ -120,10 +137,19 @@ class LoginView(APIView):
         serializer.is_valid(raise_exception=True)
         user = serializer.validated_data['user']
 
-        refresh = RefreshToken.for_user(user)
-        tokens = {'access': str(refresh.access_token), 'refresh': str(refresh)}
+        two_fa = TwoFactorAuth.objects.filter(user=user, is_enabled=True).first()
+        if two_fa:
+            return Response({
+                'message': 'Two-factor authentication code required.',
+                'require_2fa': True,
+                'user_id': user.id,
+            }, status=status.HTTP_200_OK)
 
-        create_session_record(request, user, refresh)
+        refresh = RefreshToken.for_user(user)
+        access = refresh.access_token
+        tokens = {'access': str(access), 'refresh': str(refresh)}
+
+        create_session_record(request, user, refresh, access_token=access)
 
         return Response({
             'message': 'Login successful.',
@@ -180,14 +206,16 @@ class PasswordResetRequestView(APIView):
         uid = urlsafe_base64_encode(force_bytes(user.pk))
         token = default_token_generator.make_token(user)
 
-        reset_link = f'http://localhost:5173/reset-password/{uid}/{token}/'
+        # FIX: same hardcoded-localhost problem as email verification —
+        # now uses settings.FRONTEND_URL.
+        reset_link = f'{settings.FRONTEND_URL}/reset-password/{uid}/{token}/'
 
         send_mail(
             subject='Password Reset Request',
             message=f'Click the link to reset your password: {reset_link}\n\nThis link is valid for 24 hours.',
-            from_email=getattr(settings, 'DEFAULT_FROM_EMAIL', 'noreply@example.com'),
+            from_email=settings.DEFAULT_FROM_EMAIL,
             recipient_list=[email],
-            fail_silently=False,  # TEMP: False taake Vercel logs mein asal error dikhe (debugging)
+            fail_silently=True,
         )
 
         return Response(

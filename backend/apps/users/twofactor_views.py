@@ -12,8 +12,10 @@ import base64
 from rest_framework import status, permissions
 from rest_framework.views import APIView
 from rest_framework.response import Response
+from rest_framework_simplejwt.tokens import RefreshToken
 
-from .models import TwoFactorAuth
+from .models import TwoFactorAuth, User
+from .serializers import UserProfileSerializer
 
 
 class Enable2FAView(APIView):
@@ -116,3 +118,65 @@ class Disable2FAView(APIView):
         TwoFactorAuth.objects.filter(user=request.user).delete()
 
         return Response({'message': 'Two-factor authentication disabled.'}, status=status.HTTP_200_OK)
+
+
+class TwoFactorLoginVerifyView(APIView):
+    """
+    POST /api/v1/auth/2fa/login-verify/
+
+    NEW ENDPOINT (FIX — this is the missing "second half" of 2FA).
+    Previously, LoginView checked email+password only, and 2FA's
+    enable/verify/disable existed in complete isolation from the actual
+    login flow — enabling 2FA had zero effect at login time.
+
+    Flow now:
+      1. POST /api/v1/auth/login/ with email+password.
+         If the user has 2FA enabled, it responds with
+         {"require_2fa": true, "user_id": <id>} and issues NO tokens.
+      2. Frontend shows an "Enter your 6-digit code" screen, then calls
+         THIS endpoint with {"user_id": <id>, "otp": "123456"}.
+      3. Only if the OTP is correct do we issue real tokens and create
+         the UserSession row (same as a normal login).
+
+    Request: { "user_id": 1, "otp": "123456" }
+    Response (200 OK): same shape as normal login —
+      { "message": "...", "user": {...}, "tokens": {...} }
+    """
+    permission_classes = [permissions.AllowAny]
+
+    def post(self, request):
+        # Imported here (not at top of file) to avoid a circular import
+        # between users/views.py and users/twofactor_views.py.
+        from .views import create_session_record
+
+        user_id = request.data.get('user_id')
+        otp = request.data.get('otp')
+
+        if not user_id or not otp:
+            return Response({'error': 'user_id and otp are required.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            user = User.objects.get(id=user_id, is_active=True)
+        except User.DoesNotExist:
+            return Response({'error': 'Invalid user.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            two_fa = TwoFactorAuth.objects.get(user=user, is_enabled=True)
+        except TwoFactorAuth.DoesNotExist:
+            return Response({'error': '2FA is not enabled for this account.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        totp = pyotp.TOTP(two_fa.secret)
+        if not totp.verify(otp, valid_window=1):
+            return Response({'error': 'Invalid or expired code.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        refresh = RefreshToken.for_user(user)
+        access = refresh.access_token
+        tokens = {'access': str(access), 'refresh': str(refresh)}
+
+        create_session_record(request, user, refresh, access_token=access)
+
+        return Response({
+            'message': 'Login successful.',
+            'user': UserProfileSerializer(user).data,
+            'tokens': tokens,
+        }, status=status.HTTP_200_OK)

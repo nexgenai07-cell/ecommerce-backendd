@@ -43,10 +43,17 @@ class DiscountValidateView(APIView):
         # Discount cannot exceed the order amount itself
         discount_amount = min(discount_amount, order_amount)
 
+        # FIX: field names ab doc se match karte hain —
+        #   'type'  -> 'discount_type'
+        #   'discount_value' pehle response mein tha hi nahi, ab add kiya
+        # 'code' aur 'final_amount' extra rakhe hain (harmful nahi, useful
+        # hain checkout summary ke liye) — lekin doc ke exact fields sab
+        # present hain ab.
         return Response({
             'valid': True,
             'code': discount.code,
-            'type': discount.type,
+            'discount_type': discount.type,
+            'discount_value': discount.value,
             'discount_amount': round(discount_amount, 2),
             'final_amount': round(order_amount - discount_amount, 2),
         }, status=status.HTTP_200_OK)
