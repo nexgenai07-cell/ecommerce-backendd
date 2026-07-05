@@ -138,6 +138,17 @@ class LoginView(APIView):
 
         user = serializer.validated_data["user"]
 
+        # Do not allow login until email is verified
+        if not user.email_verified:
+            return Response(
+                {
+                    "email_not_verified": True,
+                    "email": user.email,
+                    "message": "Please verify your email before logging in."
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
         two_fa = TwoFactorAuth.objects.filter(
             user=user,
             is_enabled=True,
