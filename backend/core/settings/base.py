@@ -26,6 +26,12 @@ DEBUG = os.getenv('DEBUG', 'True') == 'True'
 
 ALLOWED_HOSTS = ['*']
 
+# Stripe configuration
+# STRIPE_WEBHOOK_SECRET will be updated after setting up Stripe CLI/webhook.
+STRIPE_SECRET_KEY = os.environ.get("STRIPE_SECRET_KEY")
+STRIPE_PUBLISHABLE_KEY = os.environ.get("STRIPE_PUBLISHABLE_KEY")
+STRIPE_WEBHOOK_SECRET = os.environ.get("STRIPE_WEBHOOK_SECRET")
+
 # -------------------------------------------------
 # EMAIL
 # -------------------------------------------------

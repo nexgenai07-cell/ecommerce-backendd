@@ -1,5 +1,6 @@
 import random
 import string
+import traceback
 
 from django.db import transaction
 from django.utils import timezone
@@ -124,16 +125,15 @@ class CheckoutView(APIView):
             )
 
             order = Order.objects.create(
-                store_id=cart.store_id,
-                customer=customer,
-                order_number=generate_order_number(),
-                total_amount=total_amount,
-                discount_amount=discount_amount,
-                status="pending",
-                payment_method=data["payment_method"],
-                shipping_address=data["shipping_address"],
-                notes=data.get("notes", ""),
-            )
+            store_id=cart.store_id,
+            customer=customer,
+            order_number=generate_order_number(),
+            total_amount=total_amount,
+            discount_amount=discount_amount,
+            status="pending_payment",
+            shipping_address=data["shipping_address"],
+            notes=data.get("notes", ""),
+)
 
             for item in cart_items:
                 OrderItem.objects.create(
@@ -149,11 +149,10 @@ class CheckoutView(APIView):
                 item.product.save()
 
             Payment.objects.create(
-                order=order,
-                method=data["payment_method"],
-                status="pending",
-                amount=total_amount,
-            )
+                    order=order,
+                    status="pending",
+                    amount=total_amount,
+)
 
             cart.items.all().delete()
             cart.coupon = None
@@ -161,8 +160,8 @@ class CheckoutView(APIView):
 
         create_notification(
         user=request.user,
-        title="Order Confirmed",
-        message=f"Your order #{order.order_number} has been placed successfully.",
+        title="Order Created",
+        message=f"Your order #{order.order_number} has been created and is awaiting payment.",
         notification_type="order",
 )
 
@@ -329,18 +328,16 @@ class AdminOrderStatusUpdateView(APIView):
         order.save()
 
         status_titles = {
-            "pending": "Order Pending",
+            "pending_payment": "Awaiting Payment",
             "confirmed": "Order Confirmed",
-            "processing": "Order Processing",
             "shipped": "Order Shipped",
             "delivered": "Order Delivered",
             "cancelled": "Order Cancelled",
         }
 
         status_messages = {
-            "pending": f"Your order #{order.order_number} is pending.",
+            "pending_payment": f"Your order #{order.order_number} is awaiting payment.",
             "confirmed": f"Your order #{order.order_number} has been confirmed.",
-            "processing": f"Your order #{order.order_number} is being prepared.",
             "shipped": f"Your order #{order.order_number} is on its way.",
             "delivered": f"Your order #{order.order_number} has been delivered.",
             "cancelled": f"Your order #{order.order_number} has been cancelled.",
