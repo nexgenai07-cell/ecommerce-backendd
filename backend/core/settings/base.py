@@ -5,7 +5,6 @@ Django base settings — shared across development and production.
 from pathlib import Path
 from datetime import timedelta
 import os
-import tempfile
 import dj_database_url
 from dotenv import load_dotenv
 
@@ -247,14 +246,7 @@ STATICFILES_STORAGE = (
 )
 
 MEDIA_URL = "/media/"
-
-# Local -> backend/media
-# Vercel -> temporary writable directory
-if os.getenv("VERCEL"):
-    MEDIA_ROOT = os.path.join(tempfile.gettempdir(), "media")
-else:
-    MEDIA_ROOT = BASE_DIR / "media"
-
+MEDIA_ROOT = BASE_DIR / "media"
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 # -------------------------------------------------
