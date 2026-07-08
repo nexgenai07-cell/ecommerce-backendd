@@ -1,6 +1,5 @@
-# apps/payments/views.py
-
 import stripe
+
 from django.conf import settings
 
 from rest_framework import status, permissions
@@ -38,7 +37,7 @@ class CreatePaymentIntentView(APIView):
         try:
             intent = stripe.PaymentIntent.create(
                 amount=int(order.total_amount * 100),
-                currency="usd",
+                currency="pkr",  # Change to "usd" if your Stripe account uses USD
                 metadata={
                     "order_id": order.id,
                     "order_number": order.order_number,
@@ -51,7 +50,11 @@ class CreatePaymentIntentView(APIView):
 
             return Response(
                 {
-                    "clientSecret": intent.client_secret,
+                    "client_secret": intent.client_secret,
+                    "publishable_key": settings.STRIPE_PUBLISHABLE_KEY,
+                    "amount": int(order.total_amount * 100),
+                    "currency": "pkr",  # Must match the PaymentIntent currency
+                    "order_number": order.order_number,
                 },
                 status=status.HTTP_200_OK,
             )
