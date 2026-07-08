@@ -153,7 +153,6 @@ class CheckoutView(APIView):
 
             Payment.objects.create(
     order=order,
-    method="card",
     status="pending",
     amount=total_amount,
 ),
