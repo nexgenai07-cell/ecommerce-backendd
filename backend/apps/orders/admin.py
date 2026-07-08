@@ -134,3 +134,24 @@ class ComplaintAdmin(admin.ModelAdmin):
         "order__order_number",
         "customer__name",
     )
+
+    def formfield_for_foreignkey(self, db_field, request, **kwargs):
+        if db_field.name == "order":
+            obj_id = request.resolver_match.kwargs.get("object_id")
+
+            if obj_id:
+                complaint = Complaint.objects.filter(pk=obj_id).first()
+                if complaint:
+                    kwargs["queryset"] = Order.objects.filter(
+                        customer=complaint.customer
+                    )
+            else:
+                # While creating a new complaint from admin,
+                # don't allow selecting orders until a customer is chosen.
+                kwargs["queryset"] = Order.objects.none()
+
+        return super().formfield_for_foreignkey(
+            db_field,
+            request,
+            **kwargs,
+        )
