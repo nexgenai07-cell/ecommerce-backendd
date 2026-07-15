@@ -397,16 +397,22 @@ class AdminOrderFilterView(generics.ListAPIView):
     
     
 class AdminOrderDetailView(generics.RetrieveAPIView):
-    serializer_class =AdminOrderStatusSerializer
+    serializer_class = OrderDetailSerializer
     permission_classes = [permissions.IsAuthenticated, IsAdmin]
 
     lookup_field = "order_number"
 
-    queryset = Order.objects.select_related(
-    "customer",
-    "store",
-    "payment",
-).prefetch_related("items")
+    queryset = (
+        Order.objects.select_related(
+            "customer",
+            "store",
+            "payment",
+        )
+        .prefetch_related("items")
+    )
+def get(self, request, *args, **kwargs):
+        print(">>> ADMIN DETAIL VIEW HIT <<<")
+        return super().get(request, *args, **kwargs)
     
     
     
