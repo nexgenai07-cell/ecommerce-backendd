@@ -54,8 +54,8 @@ urlpatterns = [
     path('api/v1/admin/whatsapp/', include((admin_whatsapp_urlpatterns, 'admin-whatsapp'))),
 ]
 
-# Serve uploaded media files during development
-if settings.DEBUG:
+# Serve uploaded media files during development only (Cloudinary handles it in production)
+if settings.DEBUG and not os.getenv("CLOUDINARY_CLOUD_NAME"):
     urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
-    
-    handler404 = 'core.views.custom_404'
+
+handler404 = 'core.views.custom_404'

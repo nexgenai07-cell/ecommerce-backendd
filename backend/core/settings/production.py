@@ -17,4 +17,3 @@ MIDDLEWARE = [
 STATIC_ROOT = BASE_DIR / 'staticfiles'
 STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
 
-print("MEDIA_ROOT:", MEDIA_ROOT)
