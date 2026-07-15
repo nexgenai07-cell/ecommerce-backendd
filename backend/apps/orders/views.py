@@ -396,4 +396,17 @@ class AdminOrderFilterView(generics.ListAPIView):
         return qs
     
     
+class AdminOrderDetailView(generics.RetrieveAPIView):
+    serializer_class =AdminOrderStatusSerializer
+    permission_classes = [permissions.IsAuthenticated, IsAdmin]
+
+    lookup_field = "order_number"
+
+    queryset = Order.objects.select_related(
+        "customer",
+        "shipping_address",
+        "billing_address",
+    ).prefetch_related("items")
+    
+    
     
