@@ -1,6 +1,7 @@
 # PATH: apps/analytics/dashboard_views.py
 
 from datetime import timedelta
+from urllib import response
 from django.core.cache import cache
 from django.db.models import Sum, Count, F
 from django.db.models.functions import TruncDate, TruncWeek, TruncMonth
@@ -195,24 +196,37 @@ class BestSellersView(APIView):
     permission_classes = [permissions.IsAuthenticated, IsAdmin]
 
     def get(self, request):
-        start_date = request.query_params.get('start_date')
-        end_date = request.query_params.get('end_date')
-        limit = int(request.query_params.get('limit', 5))
+        start_date = request.query_params.get("start_date")
+        end_date = request.query_params.get("end_date")
+        limit = int(request.query_params.get("limit", 5))
 
-        qs = OrderItem.objects.exclude(order__status='cancelled')
+        qs = OrderItem.objects.exclude(order__status="cancelled")
+
         if start_date:
             qs = qs.filter(order__created_at__date__gte=start_date)
         if end_date:
             qs = qs.filter(order__created_at__date__lte=end_date)
 
         data = (
-            qs.values('product_id', 'product_name')
-              .annotate(total_sold=Sum('quantity'), total_revenue=Sum('total_price'))
-              .order_by('-total_sold')[:limit]
+            qs.values("product_id", "product_name")
+              .annotate(
+                  total_sold=Sum("quantity"),
+                  total_revenue=Sum("total_price"),
+              )
+              .order_by("-total_sold")[:limit]
         )
 
-        return Response(list(data))
+        response = [
+            {
+                "product_id": item["product_id"],
+                "name": item["product_name"],   # API docs expect "name"
+                "total_sold": item["total_sold"],
+                "total_revenue": item["total_revenue"],
+            }
+            for item in data
+        ]
 
+        return Response(response)
 
 class LowPerformingProductsView(APIView):
     """GET /api/v1/analytics/products/low-performing/?limit=5 — least sold active products"""

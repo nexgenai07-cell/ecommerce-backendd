@@ -145,5 +145,4 @@ class AuditLog(models.Model):
         return f'{actor} → {self.action} on {self.entity}:{self.entity_id}'
 
 
-    def __str__(self):
-        return f'[{self.sender}] {self.message[:50]}'
+    
