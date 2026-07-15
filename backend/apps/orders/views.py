@@ -403,10 +403,10 @@ class AdminOrderDetailView(generics.RetrieveAPIView):
     lookup_field = "order_number"
 
     queryset = Order.objects.select_related(
-        "customer",
-        "shipping_address",
-        "billing_address",
-    ).prefetch_related("items")
+    "customer",
+    "store",
+    "payment",
+).prefetch_related("items")
     
     
     
