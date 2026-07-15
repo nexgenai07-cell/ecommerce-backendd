@@ -1,5 +1,3 @@
-# PATH: apps/products/serializers.py
-
 from rest_framework import serializers
 from .models import Product, ProductImage, ProductHistory
 
@@ -10,14 +8,19 @@ class CategorySerializer(serializers.Serializer):
 
 
 class ProductImageSerializer(serializers.ModelSerializer):
+    image = serializers.CharField(read_only=True)
+
     class Meta:
         model = ProductImage
-        fields = ["id", "image", "is_primary", "created_at"]
+        fields = [
+            "id",
+            "image",
+            "is_primary",
+            "created_at",
+        ]
 
 
 class ProductListSerializer(serializers.ModelSerializer):
-    """Lightweight serializer for product listing pages"""
-
     primary_image = serializers.SerializerMethodField()
     in_stock = serializers.BooleanField(read_only=True)
     category = serializers.SerializerMethodField()
@@ -40,39 +43,41 @@ class ProductListSerializer(serializers.ModelSerializer):
     def get_category(self, obj):
         if not obj.category:
             return None
+
         return {
             "id": obj.category.id,
             "name": obj.category.name,
         }
 
     def get_primary_image(self, obj):
-        img = obj.primary_image
-        if not img or not img.image:
+        img = obj.images.filter(is_primary=True).first() or obj.images.first()
+
+        if not img:
             return None
 
-        request = self.context.get("request")
-        url = img.image.url
-        return request.build_absolute_uri(url) if request else url
+        image = img.image
 
+        if not image:
+            return None
+
+        if hasattr(image, "url"):
+            return image.url
+
+        return str(image)
 
 class LowStockProductSerializer(serializers.ModelSerializer):
-    """
-    NEW (Postman testing — 09 Jul 2026): dedicated serializer for
-    GET /api/v1/products/low-stock/. Doc requires exactly
-    {id, name, stock, low_stock_threshold} in each item. We deliberately
-    do NOT reuse ProductListSerializer here (it lacks low_stock_threshold
-    and carries extra public-listing fields that aren't part of this
-    endpoint's documented response).
-    """
 
     class Meta:
         model = Product
-        fields = ["id", "name", "stock", "low_stock_threshold"]
+        fields = [
+            "id",
+            "name",
+            "stock",
+            "low_stock_threshold",
+        ]
 
 
 class ProductDetailSerializer(serializers.ModelSerializer):
-    """Full serializer for single product page"""
-
     images = ProductImageSerializer(many=True, read_only=True)
     in_stock = serializers.BooleanField(read_only=True)
     category = serializers.SerializerMethodField()
@@ -100,6 +105,7 @@ class ProductDetailSerializer(serializers.ModelSerializer):
     def get_category(self, obj):
         if not obj.category:
             return None
+
         return {
             "id": obj.category.id,
             "name": obj.category.name,
@@ -107,7 +113,6 @@ class ProductDetailSerializer(serializers.ModelSerializer):
 
 
 class ProductCreateUpdateSerializer(serializers.ModelSerializer):
-    """Used for admin POST/PUT"""
 
     class Meta:
         model = Product
