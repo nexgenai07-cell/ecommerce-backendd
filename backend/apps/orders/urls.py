@@ -2,6 +2,7 @@
 
 from django.urls import path
 from .views import (
+    AdminOrderDetailView,
     CheckoutView,
     OrderListView,
     OrderDetailView,
@@ -31,9 +32,10 @@ urlpatterns = [
 
 # Admin order URLs (mounted at /api/v1/admin/orders/)
 admin_order_urlpatterns = [
-    path('', AdminOrderListView.as_view(), name='admin-order-list'),
-    path('filter/', AdminOrderFilterView.as_view(), name='admin-order-filter'),
-    path('<str:order_number>/status/', AdminOrderStatusUpdateView.as_view(), name='admin-order-status'),
+    path("", AdminOrderListView.as_view(), name="admin-order-list"),
+    path("filter/", AdminOrderFilterView.as_view(), name="admin-order-filter"),
+    path("<str:order_number>/", AdminOrderDetailView.as_view(), name="admin-order-detail"),
+    path("<str:order_number>/status/", AdminOrderStatusUpdateView.as_view(), name="admin-order-status"),
 ]
 
 # Returns (mounted at /api/v1/returns/ and /api/v1/admin/returns/)
@@ -56,3 +58,4 @@ admin_complaint_urlpatterns = [
     path('<int:pk>/status/', AdminComplaintStatusUpdateView.as_view(), name='admin-complaint-status'),
     path('<int:pk>/respond/', AdminComplaintRespondView.as_view(), name='admin-complaint-respond'),
 ]   
+
