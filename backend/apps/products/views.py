@@ -186,11 +186,7 @@ class ProductViewSet(viewsets.ModelViewSet):
             return Response({'error': 'No image file provided.'}, status=status.HTTP_400_BAD_REQUEST)
 
         is_first_image = not product.images.exists()
-        product_image = ProductImage.objects.create(
-            product=product,
-            image=image_file,
-            is_primary=is_first_image,  # first uploaded image becomes primary automatically
-        )
+        
 
         return Response(
             ProductImageSerializer(product_image, context={'request': request}).data,

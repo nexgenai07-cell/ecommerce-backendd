@@ -1,10 +1,11 @@
 """
 Django base settings — shared across development and production.
 """
-
+import cloudinary
 from pathlib import Path
 from datetime import timedelta
 import os
+import cloudinary
 import dj_database_url
 from dotenv import load_dotenv
 
@@ -241,25 +242,19 @@ USE_TZ = True
 # -------------------------------------------------
 # STATIC + MEDIA
 # -------------------------------------------------
-
 STATIC_URL = "/static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
 
-STATICFILES_STORAGE = (
-    "whitenoise.storage.CompressedManifestStaticFilesStorage"
-)
-
-CLOUDINARY_STORAGE = {
-    'CLOUD_NAME': os.getenv('CLOUDINARY_CLOUD_NAME'),
-    'API_KEY': os.getenv('CLOUDINARY_API_KEY'),
-    'API_SECRET': os.getenv('CLOUDINARY_API_SECRET'),
-}
-
-DEFAULT_FILE_STORAGE = 'cloudinary_storage.storage.MediaCloudinaryStorage'
-
 MEDIA_URL = "/media/"
 
-DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
+cloudinary.config(
+    cloud_name=os.getenv("CLOUDINARY_CLOUD_NAME"),
+    api_key=os.getenv("CLOUDINARY_API_KEY"),
+    api_secret=os.getenv("CLOUDINARY_API_SECRET"),
+    secure=True,
+)
+
+
 
 # -------------------------------------------------
 # CACHE
