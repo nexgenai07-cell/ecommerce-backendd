@@ -193,11 +193,17 @@ class OrderDetailView(generics.RetrieveAPIView):
     permission_classes = [permissions.IsAuthenticated]
     lookup_field = "order_number"
 
+    queryset = (
+        Order.objects
+        .select_related("customer", "store", "payment")
+        .prefetch_related("items")
+    )
+
     def get_queryset(self):
         if self.request.user.is_staff:
-            return Order.objects.all()
+            return self.queryset
 
-        return Order.objects.filter(
+        return self.queryset.filter(
             customer__user=self.request.user
         )
         
@@ -252,10 +258,16 @@ class OrderTrackView(APIView):
 
     def get(self, request, order_number):
         try:
-            order = Order.objects.get(
-                order_number=order_number,
-                customer__user=request.user,
-            )
+            if request.user.is_staff:
+                # Admin can view any order
+                order = Order.objects.get(order_number=order_number)
+            else:
+                # Customer can only view their own order
+                order = Order.objects.get(
+                    order_number=order_number,
+                    customer__user=request.user,
+                )
+
         except Order.DoesNotExist:
             return Response(
                 {"error": "Order not found."},
@@ -268,9 +280,9 @@ class OrderTrackView(APIView):
                 "status": order.status,
                 "tracking_number": order.tracking_number,
                 "updated_at": order.updated_at,
-            }
+            },
+            status=status.HTTP_200_OK,
         )
-
 
 # ============================================================
 # ADMIN VIEWS
@@ -399,20 +411,10 @@ class AdminOrderFilterView(generics.ListAPIView):
 class AdminOrderDetailView(generics.RetrieveAPIView):
     serializer_class = OrderDetailSerializer
     permission_classes = [permissions.IsAuthenticated, IsAdmin]
-
     lookup_field = "order_number"
 
     queryset = (
-        Order.objects.select_related(
-            "customer",
-            "store",
-            "payment",
-        )
+        Order.objects
+        .select_related("customer", "store", "payment")
         .prefetch_related("items")
     )
-def get(self, request, *args, **kwargs):
-        print(">>> ADMIN DETAIL VIEW HIT <<<")
-        return super().get(request, *args, **kwargs)
-    
-    
-    

@@ -83,39 +83,36 @@ class AdminOrderListSerializer(serializers.ModelSerializer):
 
 
 class OrderDetailSerializer(serializers.ModelSerializer):
-    """Full detail — used for single order page and tracking"""
+    customer_name = serializers.CharField(source="customer.name", read_only=True)
+    customer_email = serializers.EmailField(source="customer.email", read_only=True)
+    customer_phone = serializers.CharField(source="customer.phone", read_only=True)
 
+    # Nested serializers
     items = OrderItemSerializer(many=True, read_only=True)
     payment = PaymentSerializer(read_only=True)
-    customer_name = serializers.CharField(
-        source="customer.name",
-        read_only=True,
-    )
-    customer_phone = serializers.CharField(
-        source="customer.phone",
-        read_only=True,
-    )
 
     class Meta:
         model = Order
         fields = [
             "id",
             "order_number",
+            "status",
             "total_amount",
             "discount_amount",
-            "status",
             "shipping_address",
             "tracking_number",
             "notes",
-            "customer_name",
-            "customer_phone",
-            "items",
-            "payment",
             "created_at",
             "updated_at",
+
+            "customer_name",
+            "customer_email",
+            "customer_phone",
+
+            "items",
+            "payment",
         ]
-
-
+        
 class CheckoutSerializer(serializers.Serializer):
     """POST /api/v1/orders/checkout/"""
 
