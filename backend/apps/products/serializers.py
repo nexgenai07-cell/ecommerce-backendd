@@ -113,6 +113,13 @@ class ProductDetailSerializer(serializers.ModelSerializer):
 
 
 class ProductCreateUpdateSerializer(serializers.ModelSerializer):
+    sku = serializers.CharField(required=False, allow_blank=True)
+    stock_to_add = serializers.IntegerField(
+        write_only=True,
+        required=False,
+        default=0,
+        min_value=0,
+    )
 
     class Meta:
         model = Product
@@ -123,6 +130,7 @@ class ProductCreateUpdateSerializer(serializers.ModelSerializer):
             "price",
             "original_price",
             "stock",
+            "stock_to_add",
             "sku",
             "category",
             "is_active",
@@ -132,6 +140,9 @@ class ProductCreateUpdateSerializer(serializers.ModelSerializer):
         read_only_fields = ["id"]
 
     def validate_sku(self, value):
+        if not value:
+            return value
+
         qs = Product.objects.filter(sku=value)
 
         if self.instance:
@@ -147,9 +158,23 @@ class ProductCreateUpdateSerializer(serializers.ModelSerializer):
     def create(self, validated_data):
         request = self.context["request"]
         validated_data["store"] = request.user.stores.first()
+
+        stock_to_add = validated_data.pop("stock_to_add", 0)
+        validated_data["stock"] = stock_to_add
+
         return super().create(validated_data)
 
+    def update(self, instance, validated_data):
+        stock_to_add = validated_data.pop("stock_to_add", 0)
 
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+
+        instance.stock += stock_to_add
+        instance.save()
+
+        return instance
+    
 class ProductHistorySerializer(serializers.ModelSerializer):
     changed_by_name = serializers.CharField(
         source="changed_by.name",

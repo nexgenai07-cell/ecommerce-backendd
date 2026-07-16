@@ -18,6 +18,7 @@ from apps.notifications.utils import create_notification
 from .models import Customer, Order, OrderItem, Payment
 from .serializers import (
     OrderListSerializer,
+    AdminOrderListSerializer,
     OrderDetailSerializer,
     CheckoutSerializer,
     AdminOrderStatusSerializer,
@@ -290,7 +291,7 @@ class OrderTrackView(APIView):
 
 class AdminOrderListView(generics.ListAPIView):
     """GET /api/v1/admin/orders/"""
-    serializer_class = OrderListSerializer
+    serializer_class = AdminOrderListSerializer
     permission_classes = [permissions.IsAuthenticated, IsAdmin]
     pagination_class = StandardResultsPagination
 
@@ -378,7 +379,7 @@ class AdminOrderFilterView(generics.ListAPIView):
     """
     GET /api/v1/admin/orders/filter/?status=&start_date=&end_date=&customer_name=&order_number=
     """
-    serializer_class = OrderListSerializer
+    serializer_class = AdminOrderListSerializer
     permission_classes = [permissions.IsAuthenticated, IsAdmin]
     pagination_class = StandardResultsPagination
 

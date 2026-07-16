@@ -70,14 +70,31 @@ class ProductViewSet(viewsets.ModelViewSet):
         instance.save()
 
     def update(self, request, *args, **kwargs):
-        """Override to auto-create ProductHistory when price/stock change"""
         instance = self.get_object()
+
         old_price = instance.price
         old_stock = instance.stock
 
-        response = super().update(request, *args, **kwargs)
+        # Copy request data because request.data is immutable
+        data = request.data.copy()
+
+        # Amount to add to existing stock
+        stock_to_add = int(data.get("stock_to_add", 0) or 0)
+
+        if stock_to_add > 0:
+            data["stock"] = old_stock + stock_to_add
+
+        serializer = self.get_serializer(
+            instance,
+            data=data,
+            partial=kwargs.pop("partial", False),
+        )
+
+        serializer.is_valid(raise_exception=True)
+        self.perform_update(serializer)
 
         instance.refresh_from_db()
+
         if instance.price != old_price or instance.stock != old_stock:
             ProductHistory.objects.create(
                 product=instance,
@@ -86,10 +103,10 @@ class ProductViewSet(viewsets.ModelViewSet):
                 new_price=instance.price,
                 old_stock=old_stock,
                 new_stock=instance.stock,
-                reason='Manual update via admin panel',
+                reason=f"Added {stock_to_add} units" if stock_to_add > 0 else "Product updated",
             )
 
-        return response
+        return Response(serializer.data)
 
     @action(detail=False, methods=['get'], url_path='search')
     def search(self, request):
@@ -186,7 +203,12 @@ class ProductViewSet(viewsets.ModelViewSet):
             return Response({'error': 'No image file provided.'}, status=status.HTTP_400_BAD_REQUEST)
 
         is_first_image = not product.images.exists()
-        
+
+        product_image = ProductImage.objects.create(
+            product=product,
+            image=image_file,
+            is_primary=is_first_image,
+        )
 
         return Response(
             ProductImageSerializer(product_image, context={'request': request}).data,

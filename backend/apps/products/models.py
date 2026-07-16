@@ -1,28 +1,52 @@
 # PATH: apps/products/models.py
+import uuid
 
 from django.db import models
 from django.conf import settings
 
 
 class Product(models.Model):
-    store       = models.ForeignKey('stores.Store',      on_delete=models.CASCADE,  related_name='products')
-    category    = models.ForeignKey('categories.Category', on_delete=models.SET_NULL, related_name='products', null=True, blank=True)
-    name        = models.CharField(max_length=255)
-    description = models.TextField(blank=True, null=True)
-    price       = models.DecimalField(max_digits=10, decimal_places=2)
-    original_price = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)  # original/crossed price
-    stock       = models.PositiveIntegerField(default=0)
-    sku         = models.CharField(max_length=100, unique=True)
-    is_active   = models.BooleanField(default=True)
-    publish_at           = models.DateTimeField(null=True, blank=True)
-    low_stock_threshold  = models.PositiveIntegerField(default=5)
+    store = models.ForeignKey(
+        "stores.Store",
+        on_delete=models.CASCADE,
+        related_name="products",
+    )
+    category = models.ForeignKey(
+        "categories.Category",
+        on_delete=models.SET_NULL,
+        related_name="products",
+        null=True,
+        blank=True,
+    )
 
-    created_at  = models.DateTimeField(auto_now_add=True)
-    updated_at  = models.DateTimeField(auto_now=True)
+    name = models.CharField(max_length=255)
+    description = models.TextField(blank=True, null=True)
+    price = models.DecimalField(max_digits=10, decimal_places=2)
+    original_price = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        null=True,
+        blank=True,
+    )
+    stock = models.PositiveIntegerField(default=0)
+
+    # Auto-generated if left blank
+    sku = models.CharField(
+        max_length=100,
+        unique=True,
+        blank=True,
+    )
+
+    is_active = models.BooleanField(default=True)
+    publish_at = models.DateTimeField(null=True, blank=True)
+    low_stock_threshold = models.PositiveIntegerField(default=5)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
-        db_table = 'products'
-        ordering = ['-created_at']
+        db_table = "products"
+        ordering = ["-created_at"]
 
     def __str__(self):
         return self.name
@@ -35,18 +59,33 @@ class Product(models.Model):
     def in_stock(self):
         return self.stock > 0
 
+    def save(self, *args, **kwargs):
+        # Generate SKU only if it is empty
+        if not self.sku:
+            while True:
+                sku = f"SKU-{uuid.uuid4().hex[:8].upper()}"
+                if not Product.objects.filter(sku=sku).exists():
+                    self.sku = sku
+                    break
+
+        super().save(*args, **kwargs)
+from cloudinary.models import CloudinaryField
 
 class ProductImage(models.Model):
-    product    = models.ForeignKey(Product, on_delete=models.CASCADE, related_name='images')
-    image = models.URLField(max_length=1000)
+    product = models.ForeignKey(
+        Product,
+        on_delete=models.CASCADE,
+        related_name="images",
+    )
+    image = CloudinaryField("image", blank=True, null=True)
     is_primary = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
-        db_table = 'product_images'
+        db_table = "product_images"
 
     def __str__(self):
-        return f'Image for {self.product.name}'
+        return f"Image for {self.product.name}"
 
 
 class ProductHistory(models.Model):
