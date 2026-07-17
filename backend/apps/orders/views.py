@@ -25,6 +25,7 @@ from .serializers import (
 )
 
 from apps.cart.models import Cart
+from apps.products.models import Product, StockMovement
 from apps.users.permissions import IsAdmin
 
 
@@ -58,6 +59,53 @@ def get_or_create_customer(user, store_id=1):
     return customer
 
 
+def restore_stock_for_order(order, user=None):
+    """
+    Shared helper — restores stock for every item in a cancelled order,
+    using the same select_for_update() + StockMovement audit pattern as
+    checkout and the manual adjust endpoint (stock race-condition fix,
+    point 6: cancellations must use the same atomic approach and be
+    logged in the same audit trail).
+
+    'user' is the admin who triggered the status change, if any — None
+    means the cancellation was triggered by the customer themselves via
+    OrderCancelView, which is still a real actor (request.user), so
+    callers should pass request.user; this stays None only if truly
+    system-triggered elsewhere in the future.
+    """
+    items = list(order.items.select_related("product").all())
+    product_ids = [item.product_id for item in items if item.product_id]
+
+    if not product_ids:
+        return
+
+    locked_products = {
+        p.id: p
+        for p in Product.objects.select_for_update().filter(id__in=product_ids)
+    }
+
+    for item in items:
+        product = locked_products.get(item.product_id)
+        if not product:
+            continue
+
+        old_stock = product.stock
+        new_stock = old_stock + item.quantity
+
+        product.stock = new_stock
+        product.save(update_fields=["stock"])
+
+        StockMovement.objects.create(
+            product=product,
+            changed_by=user,
+            old_stock=old_stock,
+            new_stock=new_stock,
+            delta=item.quantity,
+            reason="order_cancelled",
+            note=f"Order {order.order_number} cancelled",
+        )
+
+
 class CheckoutView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
@@ -77,18 +125,27 @@ class CheckoutView(APIView):
         with transaction.atomic():
 
             cart_items = list(
-                cart.items.select_related("product")
-                .select_for_update()
-                .all()
+                cart.items.select_related("product").all()
             )
+
+            product_ids = [item.product_id for item in cart_items]
+
+            # FIX (stock race-condition): lock the actual Product rows,
+            # not just the cart items. Locking CartItem rows alone did
+            # not protect against a concurrent checkout or manual stock
+            # adjustment touching the same Product at the same time.
+            locked_products = {
+                p.id: p
+                for p in Product.objects.select_for_update().filter(id__in=product_ids)
+            }
 
             out_of_stock = []
 
             for item in cart_items:
-                product = item.product
+                product = locked_products.get(item.product_id)
 
-                if product.stock < item.quantity:
-                    out_of_stock.append(product.name)
+                if not product or product.stock < item.quantity:
+                    out_of_stock.append(item.product.name if item.product else "Unknown product")
 
             if out_of_stock:
                 return Response(
@@ -129,15 +186,15 @@ class CheckoutView(APIView):
             )
 
             order = Order.objects.create(
-            store_id=cart.store_id,
-            customer=customer,
-            order_number=generate_order_number(),
-            total_amount=total_amount,
-            discount_amount=discount_amount,
-            status="pending_payment",
-            shipping_address=data["shipping_address"],
-            notes=data.get("notes", ""),
-)
+                store_id=cart.store_id,
+                customer=customer,
+                order_number=generate_order_number(),
+                total_amount=total_amount,
+                discount_amount=discount_amount,
+                status="pending_payment",
+                shipping_address=data["shipping_address"],
+                notes=data.get("notes", ""),
+            )
 
             for item in cart_items:
                 OrderItem.objects.create(
@@ -149,25 +206,42 @@ class CheckoutView(APIView):
                     total_price=item.product.price * item.quantity,
                 )
 
-                item.product.stock -= item.quantity
-                item.product.save()
+                # FIX (stock race-condition): decrement via the row we
+                # already locked above, and log the movement in the same
+                # audit table used by the manual adjust endpoint.
+                product = locked_products[item.product_id]
+                old_stock = product.stock
+                new_stock = old_stock - item.quantity
+
+                product.stock = new_stock
+                product.save(update_fields=["stock"])
+
+                StockMovement.objects.create(
+                    product=product,
+                    changed_by=None,
+                    old_stock=old_stock,
+                    new_stock=new_stock,
+                    delta=-item.quantity,
+                    reason="order_placed",
+                    note=f"Order {order.order_number} checkout",
+                )
 
             Payment.objects.create(
-    order=order,
-    status="pending",
-    amount=total_amount,
-),
+                order=order,
+                status="pending",
+                amount=total_amount,
+            )
 
             cart.items.all().delete()
             cart.coupon = None
             cart.save()
 
         create_notification(
-        user=request.user,
-        title="Order Created",
-        message=f"Your order #{order.order_number} has been created and is awaiting payment.",
-        notification_type="order",
-)
+            user=request.user,
+            title="Order Created",
+            message=f"Your order #{order.order_number} has been created and is awaiting payment.",
+            notification_type="order",
+        )
 
         return Response(
             OrderDetailSerializer(order).data,
@@ -238,10 +312,10 @@ class OrderCancelView(APIView):
             )
 
         with transaction.atomic():
-            for item in order.items.all():
-                if item.product:
-                    item.product.stock += item.quantity
-                    item.product.save()
+            # FIX (stock race-condition): stock restoration now goes
+            # through the shared, locked, audited helper instead of a
+            # plain read-modify-save loop.
+            restore_stock_for_order(order, user=request.user)
 
             order.status = "cancelled"
             order.save()
@@ -325,10 +399,9 @@ class AdminOrderStatusUpdateView(APIView):
 
         if new_status == "cancelled" and order.status != "cancelled":
             with transaction.atomic():
-                for item in order.items.all():
-                    if item.product:
-                        item.product.stock += item.quantity
-                        item.product.save()
+                # FIX (stock race-condition): same shared, locked,
+                # audited helper as the customer-facing cancel view.
+                restore_stock_for_order(order, user=request.user)
 
                 if hasattr(order, "payment"):
                     order.payment.status = "refunded"
@@ -363,15 +436,15 @@ class AdminOrderStatusUpdateView(APIView):
         }
 
         create_notification(
-        user=order.customer.user,
-        store=order.store,
-        title=status_titles.get(new_status, "Order Update"),
-        message=status_messages.get(
-        new_status,
-        f"Your order #{order.order_number} has been updated.",
-    ),
-        notification_type="order",
-)
+            user=order.customer.user,
+            store=order.store,
+            title=status_titles.get(new_status, "Order Update"),
+            message=status_messages.get(
+                new_status,
+                f"Your order #{order.order_number} has been updated.",
+            ),
+            notification_type="order",
+        )
 
         return Response(OrderDetailSerializer(order).data)
     

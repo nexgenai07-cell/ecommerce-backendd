@@ -1,18 +1,21 @@
 # PATH: apps/products/views.py
-
+from .services import adjust_stock
+from .services import adjust_stock as adjust_stock_service
+from django.db import transaction
 from rest_framework import viewsets, permissions, status, filters
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.parsers import MultiPartParser, FormParser
 from django.db.models import Q
 
-from .models import Product, ProductImage, ProductHistory
+from .models import Product, ProductImage, ProductHistory, StockMovement
 from .serializers import (
     ProductListSerializer,
     ProductDetailSerializer,
     ProductCreateUpdateSerializer,
     ProductImageSerializer,
     LowStockProductSerializer,
+    StockAdjustSerializer,
 )
 from apps.users.permissions import IsAdmin
 from core.pagination import StandardResultsPagination
@@ -32,6 +35,8 @@ class ProductViewSet(viewsets.ModelViewSet):
     POST   /api/v1/products/{id}/images/                       -> add image (admin only)
     DELETE /api/v1/products/{id}/images/{image_id}/             -> remove image (admin only)
     PUT    /api/v1/products/{id}/images/{image_id}/set-primary/ -> set primary (admin only)
+
+    POST   /api/v1/products/{id}/stock/adjust/                  -> atomic stock adjustment (admin only)
     """
     filter_backends = [filters.SearchFilter]
     search_fields = ['name', 'description']
@@ -57,6 +62,8 @@ class ProductViewSet(viewsets.ModelViewSet):
             return ProductListSerializer
         if self.action in ['create', 'update', 'partial_update']:
             return ProductCreateUpdateSerializer
+        if self.action == 'adjust_stock':
+            return StockAdjustSerializer
         return ProductDetailSerializer
 
     def get_permissions(self):
@@ -263,3 +270,25 @@ class ProductViewSet(viewsets.ModelViewSet):
             'message': 'Primary image updated.',
             'image_id': image.id,
         })
+
+@action(
+    detail=True,
+    methods=["post"],
+    url_path="stock/adjust",
+    permission_classes=[permissions.IsAuthenticated, IsAdmin],
+)
+def adjust_stock(self, request, pk=None):
+    serializer = StockAdjustSerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+
+    product = self.get_object()
+
+    result = adjust_stock_service(
+        product=product,
+        delta=serializer.validated_data["delta"],
+        reason=serializer.validated_data["reason"],
+        changed_by=request.user,
+        note=serializer.validated_data.get("note", ""),
+    )
+
+    return Response(result)

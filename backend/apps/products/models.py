@@ -69,6 +69,8 @@ class Product(models.Model):
                     break
 
         super().save(*args, **kwargs)
+
+
 from cloudinary.models import CloudinaryField
 
 class ProductImage(models.Model):
@@ -101,6 +103,53 @@ class ProductHistory(models.Model):
     class Meta:
         db_table = 'product_history'
         ordering = ['-created_at']
+
+
+# NEW (stock race-condition fix — full audit trail): dedicated table for
+# every stock movement, whether triggered manually by an admin via the
+# new POST /stock/adjust/ endpoint, or automatically by checkout, order
+# cancellation, or return approval. 'reason' choices include the 5
+# manual-adjustment reasons from the endpoint contract, plus internal
+# system reasons used only by checkout/cancel/return flows (never
+# accepted directly from the adjust endpoint's request body).
+class StockMovement(models.Model):
+    REASON_CHOICES = [
+        ('restock', 'Restock'),
+        ('damaged', 'Damaged'),
+        ('correction', 'Correction'),
+        ('return', 'Return'),
+        ('other', 'Other'),
+        # Internal/system-triggered reasons (not exposed via the manual
+        # adjust endpoint's serializer choices):
+        ('order_placed', 'Order Placed (checkout)'),
+        ('order_cancelled', 'Order Cancelled (stock restored)'),
+    ]
+
+    product = models.ForeignKey(
+        Product,
+        on_delete=models.CASCADE,
+        related_name='stock_movements',
+    )
+    changed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        help_text="Null for system-triggered movements (checkout, auto-cancel, etc).",
+    )
+    old_stock = models.IntegerField()
+    new_stock = models.IntegerField()
+    delta = models.IntegerField()
+    reason = models.CharField(max_length=30, choices=REASON_CHOICES)
+    note = models.CharField(max_length=255, blank=True, null=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'stock_movements'
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"{self.product.name}: {self.old_stock} -> {self.new_stock} ({self.reason})"
 
 
 class Discount(models.Model):

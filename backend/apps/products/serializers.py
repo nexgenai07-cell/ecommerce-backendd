@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Product, ProductImage, ProductHistory
+from .models import Product, ProductImage, ProductHistory, StockMovement
 
 
 class CategorySerializer(serializers.Serializer):
@@ -165,6 +165,14 @@ class ProductCreateUpdateSerializer(serializers.ModelSerializer):
         return super().create(validated_data)
 
     def update(self, instance, validated_data):
+        # NOTE (stock race-condition fix): 'stock_to_add' on this endpoint
+        # is kept working for backward compatibility, but the frontend
+        # should no longer send it once a product already exists — stock
+        # changes after creation now go through the dedicated, atomic
+        # POST /api/v1/products/{id}/stock/adjust/ endpoint instead,
+        # which is safe under concurrent checkout/cancel activity. This
+        # PUT/update path is NOT safe for concurrent stock changes since
+        # it reads instance.stock in Python before saving.
         stock_to_add = validated_data.pop("stock_to_add", 0)
 
         for attr, value in validated_data.items():
@@ -194,3 +202,27 @@ class ProductHistorySerializer(serializers.ModelSerializer):
             "reason",
             "created_at",
         ]
+
+
+# NEW (stock race-condition fix): validates the request body for
+# POST /api/v1/products/{id}/stock/adjust/. Only the 5 manual-adjustment
+# reasons are accepted here — 'order_placed' / 'order_cancelled' are
+# system-only reasons used internally by checkout/cancel flows and are
+# never accepted from this endpoint.
+class StockAdjustSerializer(serializers.Serializer):
+    MANUAL_REASON_CHOICES = [
+        "restock",
+        "damaged",
+        "correction",
+        "return",
+        "other",
+    ]
+
+    delta = serializers.IntegerField()
+    reason = serializers.ChoiceField(choices=MANUAL_REASON_CHOICES)
+    note = serializers.CharField(required=False, allow_blank=True, max_length=255)
+
+    def validate_delta(self, value):
+        if value == 0:
+            raise serializers.ValidationError("delta cannot be 0.")
+        return value
