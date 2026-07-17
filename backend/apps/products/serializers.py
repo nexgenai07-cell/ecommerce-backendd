@@ -163,6 +163,20 @@ class ProductCreateUpdateSerializer(serializers.ModelSerializer):
         validated_data["stock"] = stock_to_add
 
         return super().create(validated_data)
+    
+    
+    def validate_name(self, value):
+      qs = Product.objects.filter(name=value)
+
+      if self.instance:
+        qs = qs.exclude(pk=self.instance.pk)
+
+      if qs.exists():
+        raise serializers.ValidationError(
+            "A product with this name already exists."
+        )
+
+      return value
 
     def update(self, instance, validated_data):
         # NOTE (stock race-condition fix): 'stock_to_add' on this endpoint

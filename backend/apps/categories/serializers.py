@@ -20,3 +20,16 @@ class CategorySerializer(serializers.ModelSerializer):
         request = self.context['request']
         validated_data['store'] = request.user.stores.first()
         return super().create(validated_data)
+    
+    def validate_name(self, value):
+      qs = Category.objects.filter(name=value)
+
+      if self.instance:
+        qs = qs.exclude(pk=self.instance.pk)
+
+      if qs.exists():
+        raise serializers.ValidationError(
+            "A category with this name already exists."
+        )
+
+      return value

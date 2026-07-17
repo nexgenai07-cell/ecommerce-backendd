@@ -9,7 +9,7 @@ class Category(models.Model):
                     on_delete=models.CASCADE,
                     related_name='categories',
                   )
-    name        = models.CharField(max_length=255)
+    name = models.CharField(max_length=255, unique=True)
     description = models.TextField(blank=True, null=True)
     image       = models.ImageField(upload_to='categories/', null=True, blank=True)
     created_at  = models.DateTimeField(auto_now_add=True)

@@ -19,7 +19,7 @@ class Product(models.Model):
         blank=True,
     )
 
-    name = models.CharField(max_length=255)
+    name = models.CharField(max_length=255, unique=True)
     description = models.TextField(blank=True, null=True)
     price = models.DecimalField(max_digits=10, decimal_places=2)
     original_price = models.DecimalField(
