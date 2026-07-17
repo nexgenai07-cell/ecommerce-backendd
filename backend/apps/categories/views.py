@@ -1,5 +1,6 @@
-from rest_framework import viewsets, permissions
+from rest_framework import viewsets, permissions, status
 from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
+from rest_framework.response import Response
 
 from .models import Category
 from .serializers import CategorySerializer
@@ -12,31 +13,64 @@ class CategoryViewSet(viewsets.ModelViewSet):
     POST   /api/v1/categories/       -> create (admin only)
     GET    /api/v1/categories/{id}/  -> retrieve (anyone)
     PUT    /api/v1/categories/{id}/  -> update (admin only)
-    DELETE /api/v1/categories/{id}/  -> delete (admin only)
+    DELETE /api/v1/categories/{id}/  -> soft delete (admin only)
     """
 
     serializer_class = CategorySerializer
     parser_classes = [MultiPartParser, FormParser, JSONParser]
-
-    # Disable pagination for this endpoint
     pagination_class = None
 
     def get_queryset(self):
-        return Category.objects.all().order_by("name")
+        queryset = Category.objects.all().order_by("name")
+
+        # Customers and guests only see active categories.
+        # Admins see both active and inactive categories.
+        if not (
+            self.request.user.is_authenticated
+            and self.request.user.role == "admin"
+        ):
+            queryset = queryset.filter(is_active=True)
+
+        return queryset
 
     def get_permissions(self):
         if self.action in ["list", "retrieve"]:
             return [permissions.AllowAny()]
         return [permissions.IsAuthenticated(), IsAdmin()]
-    
 
     def perform_create(self, serializer):
-        # Doc ke mutabik request body se kuch nahi lena.
-        # Login admin user ke custom relation 'stores' se automatic active store uthana hai.
-        user_store = self.request.user.stores.first() 
-        
+        # Automatically assign the logged-in admin's store.
+        user_store = self.request.user.stores.first()
+
         if user_store:
             serializer.save(store=user_store)
         else:
             from rest_framework.exceptions import ValidationError
-            raise ValidationError({"detail": "This admin user is not associated with any store in the database."})
+
+            raise ValidationError(
+                {
+                    "detail": "This admin user is not associated with any store in the database."
+                }
+            )
+
+    def perform_destroy(self, instance):
+        """
+        Soft delete category instead of removing it from the database.
+        """
+        instance.is_active = False
+        instance.save(update_fields=["is_active"])
+
+    def destroy(self, request, *args, **kwargs):
+        """
+        DELETE /api/v1/categories/{id}/
+        Soft delete the category.
+        """
+        instance = self.get_object()
+        self.perform_destroy(instance)
+
+        return Response(
+            {
+                "message": "Category deleted successfully."
+            },
+            status=status.HTTP_200_OK,
+        )
