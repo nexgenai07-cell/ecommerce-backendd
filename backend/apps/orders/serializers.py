@@ -52,13 +52,7 @@ class OrderListSerializer(serializers.ModelSerializer):
 
 class AdminOrderListSerializer(serializers.ModelSerializer):
     """
-    NEW (Postman testing — 09 Jul 2026): used ONLY for admin order
-    listing/filtering (API 57, 58). Doc requires a nested
-    "customer": {"name", "phone"} object here — unlike OrderListSerializer
-    (My Orders, API 53) where the logged-in customer doesn't need their
-    own info echoed back. Kept as a separate serializer instead of adding
-    "customer" to OrderListSerializer so API 53's response shape doesn't
-    change.
+    Used for Admin Order List and Admin Order Filter APIs.
     """
 
     customer = serializers.SerializerMethodField()
@@ -77,19 +71,23 @@ class AdminOrderListSerializer(serializers.ModelSerializer):
 
     def get_customer(self, obj):
         return {
+            "id": obj.customer.id,
             "name": obj.customer.name,
             "phone": obj.customer.phone,
         }
 
 
 class OrderDetailSerializer(serializers.ModelSerializer):
-    customer_name = serializers.CharField(source="customer.name", read_only=True)
-    customer_email = serializers.EmailField(source="customer.email", read_only=True)
-    customer_phone = serializers.CharField(source="customer.phone", read_only=True)
+    customer = serializers.SerializerMethodField()
 
-    # Nested serializers
-    items = OrderItemSerializer(many=True, read_only=True)
-    payment = PaymentSerializer(read_only=True)
+    items = OrderItemSerializer(
+        many=True,
+        read_only=True,
+    )
+
+    payment = PaymentSerializer(
+        read_only=True,
+    )
 
     class Meta:
         model = Order
@@ -105,13 +103,19 @@ class OrderDetailSerializer(serializers.ModelSerializer):
             "created_at",
             "updated_at",
 
-            "customer_name",
-            "customer_email",
-            "customer_phone",
+            "customer",
 
             "items",
             "payment",
         ]
+
+    def get_customer(self, obj):
+        return {
+            "id": obj.customer.id,
+            "name": obj.customer.name,
+            "email": obj.customer.email,
+            "phone": obj.customer.phone,
+        }
         
 class CheckoutSerializer(serializers.Serializer):
     """POST /api/v1/orders/checkout/"""

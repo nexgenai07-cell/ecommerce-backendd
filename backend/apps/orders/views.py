@@ -5,6 +5,7 @@ import string
 
 stripe.api_key = settings.STRIPE_SECRET_KEY
 
+from django.db.models import Q
 from django.db import transaction
 from django.utils import timezone
 
@@ -450,38 +451,60 @@ class AdminOrderStatusUpdateView(APIView):
     
 class AdminOrderFilterView(generics.ListAPIView):
     """
-    GET /api/v1/admin/orders/filter/?status=&start_date=&end_date=&customer_name=&order_number=
+    GET /api/v1/admin/orders/filter/
+
+    Query Params:
+    - status
+    - start_date
+    - end_date
+    - search
+    - customer_id
+    - page
     """
+
     serializer_class = AdminOrderListSerializer
     permission_classes = [permissions.IsAuthenticated, IsAdmin]
     pagination_class = StandardResultsPagination
 
     def get_queryset(self):
-        qs = Order.objects.all().order_by("-created_at")
+        qs = (
+            Order.objects
+            .select_related("customer")
+            .all()
+            .order_by("-created_at")
+        )
+
         params = self.request.query_params
 
-        if params.get("status"):
-            qs = qs.filter(status=params["status"])
+        # Status filter
+        status = params.get("status")
+        if status:
+            qs = qs.filter(status=status)
 
-        if params.get("start_date"):
-            qs = qs.filter(created_at__date__gte=params["start_date"])
+        # Customer filter (NEW)
+        customer_id = params.get("customer_id")
+        if customer_id:
+            qs = qs.filter(customer_id=customer_id)
 
-        if params.get("end_date"):
-            qs = qs.filter(created_at__date__lte=params["end_date"])
+        # Date filters
+        start_date = params.get("start_date")
+        if start_date:
+            qs = qs.filter(created_at__date__gte=start_date)
 
-        if params.get("customer_name"):
+        end_date = params.get("end_date")
+        if end_date:
+            qs = qs.filter(created_at__date__lte=end_date)
+
+        # Search
+        search = params.get("search")
+        if search:
             qs = qs.filter(
-                customer__name__icontains=params["customer_name"]
-            )
-
-        if params.get("order_number"):
-            qs = qs.filter(
-                order_number__icontains=params["order_number"]
+                Q(order_number__icontains=search) |
+                Q(customer__name__icontains=search)
             )
 
         return qs
-    
-    
+
 class AdminOrderDetailView(generics.RetrieveAPIView):
     serializer_class = OrderDetailSerializer
     permission_classes = [permissions.IsAuthenticated, IsAdmin]
