@@ -1,5 +1,8 @@
 # PATH: apps/products/views.py
-from .services import adjust_stock
+from unittest import result
+from urllib import request
+
+from urllib import request
 from .services import adjust_stock as adjust_stock_service
 from django.db import transaction
 from rest_framework import viewsets, permissions, status, filters
@@ -243,52 +246,62 @@ class ProductViewSet(viewsets.ModelViewSet):
                 next_image.save()
 
         return Response(status=status.HTTP_204_NO_CONTENT)
+    
 
-    @action(detail=True, methods=['put'], url_path='images/(?P<image_id>[^/.]+)/set-primary',
-            permission_classes=[permissions.IsAuthenticated, IsAdmin])
+    @action(
+        detail=True,
+        methods=["post"],
+        url_path="stock/adjust",
+        permission_classes=[permissions.IsAuthenticated, IsAdmin],
+    )
+    def adjust_stock(self, request, pk=None):
+        serializer = StockAdjustSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        product = self.get_object()
+
+        result = adjust_stock_service(
+            product=product,
+            delta=serializer.validated_data["delta"],
+            reason=serializer.validated_data["reason"],
+            changed_by=request.user,
+            note=serializer.validated_data.get("note", ""),
+        )
+
+        return Response(result)
+
+
+    @action(
+        detail=True,
+        methods=['put'],
+        url_path='images/(?P<image_id>[^/.]+)/set-primary',
+        permission_classes=[permissions.IsAuthenticated, IsAdmin]
+    )
     def set_primary_image(self, request, pk=None, image_id=None):
         """
         PUT /api/v1/products/{id}/images/{image_id}/set-primary/
-
-        FIX (Postman testing — 09 Jul 2026): doc ke mutabiq response
-        {"message": "Primary image updated.", "image_id": <id>} hona
-        chahiye. Pehle poora ProductImageSerializer(image).data return ho
-        raha tha (id, image url, is_primary, created_at) jo doc se match
-        nahi karta tha. Ab exact documented shape return ho raha hai.
         """
         product = self.get_object()
+
         try:
             image = product.images.get(id=image_id)
         except ProductImage.DoesNotExist:
-            return Response({'error': 'Image not found.'}, status=status.HTTP_404_NOT_FOUND)
+            return Response(
+                {"error": "Image not found."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
 
+        # Remove primary flag from all images
         product.images.update(is_primary=False)
+
+        # Make selected image primary
         image.is_primary = True
         image.save()
 
-        return Response({
-            'message': 'Primary image updated.',
-            'image_id': image.id,
-        })
-
-@action(
-    detail=True,
-    methods=["post"],
-    url_path="stock/adjust",
-    permission_classes=[permissions.IsAuthenticated, IsAdmin],
-)
-def adjust_stock(self, request, pk=None):
-    serializer = StockAdjustSerializer(data=request.data)
-    serializer.is_valid(raise_exception=True)
-
-    product = self.get_object()
-
-    result = adjust_stock_service(
-        product=product,
-        delta=serializer.validated_data["delta"],
-        reason=serializer.validated_data["reason"],
-        changed_by=request.user,
-        note=serializer.validated_data.get("note", ""),
-    )
-
-    return Response(result)
+        return Response(
+            {
+                "message": "Primary image updated.",
+                "image_id": image.id,
+            },
+            status=status.HTTP_200_OK,
+        )
