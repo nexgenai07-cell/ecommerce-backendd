@@ -7,7 +7,8 @@ import secrets
 from datetime import timedelta
 from django.utils import timezone
 
-
+# Custom manager responsible for creating normal users
+# and superusers using email instead of username.
 class UserManager(BaseUserManager):
 
     def create_user(self, email, password=None, **extra_fields):
@@ -19,6 +20,11 @@ class UserManager(BaseUserManager):
         user.set_password(password)
         user.save(using=self._db)
         return user
+    # Creates a normal user with a hashed password.
+    # If no role is supplied, the user becomes a customer by default.
+    # Creates an admin/superuser with all required permissions.
+    # Custom user model that uses email as the unique login field
+    # and stores additional information like role and phone number.
 
     def create_superuser(self, email, password=None, **extra_fields):
         extra_fields.setdefault('role', 'admin')
@@ -102,9 +108,12 @@ class UserSession(models.Model):
 
     def __str__(self):
         return f'{self.user.email} — {self.device} ({self.browser})'
+    # Stores information about every login session so users can
+    # view and manage active devices independently.
 
 
 class TwoFactorAuth(models.Model):
+    # Stores the secret key and status required for two-factor authentication.
     """
     One row per user. Stores the TOTP secret used to generate/verify the
     6-digit codes shown in apps like Google Authenticator.
@@ -126,6 +135,7 @@ class TwoFactorAuth(models.Model):
 
 
 class EmailVerification(models.Model):
+    # Creates and validates email verification tokens used during account verification.
     """
     One row per verification email sent. The token is single-use (is_used
     flips to True once consumed) and expires after 24 hours by default,
@@ -150,3 +160,5 @@ class EmailVerification(models.Model):
             token=secrets.token_urlsafe(32),
             expires_at=timezone.now() + timedelta(hours=validity_hours),
         )
+        
+        

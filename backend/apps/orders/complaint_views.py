@@ -16,7 +16,9 @@ from .models import Order, Customer
 from apps.users.permissions import IsAdmin
 from core.pagination import StandardResultsPagination
 
-
+# Handles both:
+# GET  -> List complaints
+# POST -> Create a new complaint
 class CreateComplaintView(generics.ListCreateAPIView):
     """
     POST /api/v1/complaints/ -> submit a complaint
@@ -33,11 +35,13 @@ class CreateComplaintView(generics.ListCreateAPIView):
     parser_classes = [MultiPartParser, FormParser, JSONParser]
     pagination_class = StandardResultsPagination
 
+# Admin can view every complaint in the system.
     def get_queryset(self):
         user = self.request.user
         if user.role == "admin":
             return Complaint.objects.all().order_by("-created_at")
 
+# Customers can only see their own complaints.
         return Complaint.objects.filter(
             customer__user=user
         ).order_by("-created_at")
@@ -79,20 +83,22 @@ class CreateComplaintView(generics.ListCreateAPIView):
             status=status.HTTP_201_CREATED,
         )
 
-
+# Returns details of one complaint.
 class ComplaintDetailView(generics.RetrieveAPIView):
     """GET /api/v1/complaints/{id}/"""
 
     serializer_class = ComplaintSerializer
     permission_classes = [permissions.IsAuthenticated]
 
+# Admin can open any complaint.
     def get_queryset(self):
         user = self.request.user
         if user.role == "admin":
             return Complaint.objects.all()
 
-        return Complaint.objects.filter(customer__user=user)
+        return Complaint.objects.filter(customer__user=user) # Customer can only open their own complaints.
 
+# Retrieves the requested complaint.
     def retrieve(self, request, *args, **kwargs):
         complaint = self.get_object()
         serializer = ComplaintSerializer(
@@ -101,7 +107,7 @@ class ComplaintDetailView(generics.RetrieveAPIView):
         )
         return Response(serializer.data)
 
-
+# Allows admin to change complaint status.
 class AdminComplaintStatusUpdateView(APIView):
     """
     PUT /api/v1/admin/complaints/{id}/status/
@@ -131,7 +137,10 @@ class AdminComplaintStatusUpdateView(APIView):
 
         return Response({"message": "Complaint status updated."})
 
-
+# Allows admin to reply to customer complaints.
+# Finds the complaint to respond to.
+# Validates the admin's response.
+# Saves the admin's reply.
 class AdminComplaintRespondView(APIView):
     """
     PUT /api/v1/admin/complaints/{id}/respond/

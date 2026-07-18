@@ -3,7 +3,8 @@
 from rest_framework import serializers
 from .models import Customer, Order, OrderItem, Payment
 
-
+# Converts each order item into API response format.
+# Used inside OrderDetailSerializer.
 class OrderItemSerializer(serializers.ModelSerializer):
     class Meta:
         model = OrderItem
@@ -16,7 +17,8 @@ class OrderItemSerializer(serializers.ModelSerializer):
             "total_price",
         ]
 
-
+# Converts payment details into API response.
+# Used when returning complete order information.
 class PaymentSerializer(serializers.ModelSerializer):
     class Meta:
         model = Payment
@@ -28,7 +30,7 @@ class PaymentSerializer(serializers.ModelSerializer):
             "paid_at",
         ]
 
-
+# Returns a lightweight order summary for customer order history.
 class OrderListSerializer(serializers.ModelSerializer):
     """Lightweight — used for order history list (My Orders, API 53)"""
 
@@ -45,11 +47,12 @@ class OrderListSerializer(serializers.ModelSerializer):
             "item_count",
             "created_at",
         ]
-
+        
+# Counts how many products belong to this order.
     def get_item_count(self, obj):
         return obj.items.count()
 
-
+# Returns order summary with customer information for admin dashboard.
 class AdminOrderListSerializer(serializers.ModelSerializer):
     """
     Used for Admin Order List and Admin Order Filter APIs.
@@ -69,6 +72,7 @@ class AdminOrderListSerializer(serializers.ModelSerializer):
             "created_at",
         ]
 
+# Formats customer details into a small nested object.
     def get_customer(self, obj):
         return {
             "id": obj.customer.id,
@@ -76,7 +80,7 @@ class AdminOrderListSerializer(serializers.ModelSerializer):
             "phone": obj.customer.phone,
         }
 
-
+# Returns complete order details including customer, items and payment.
 class OrderDetailSerializer(serializers.ModelSerializer):
     customer = serializers.SerializerMethodField()
 
@@ -109,6 +113,7 @@ class OrderDetailSerializer(serializers.ModelSerializer):
             "payment",
         ]
 
+# Returns complete customer information for the order.
     def get_customer(self, obj):
         return {
             "id": obj.customer.id,
@@ -116,7 +121,8 @@ class OrderDetailSerializer(serializers.ModelSerializer):
             "email": obj.customer.email,
             "phone": obj.customer.phone,
         }
-        
+
+# Validates checkout request before creating an order.
 class CheckoutSerializer(serializers.Serializer):
     """POST /api/v1/orders/checkout/"""
 
@@ -126,7 +132,7 @@ class CheckoutSerializer(serializers.Serializer):
         allow_blank=True,
     )
 
-
+# Validates order status updates made by the admin.
 class AdminOrderStatusSerializer(serializers.Serializer):
     status = serializers.ChoiceField(
         choices=[

@@ -4,7 +4,7 @@ import uuid
 from django.db import models
 from django.conf import settings
 
-
+# Main product model that stores all product information.
 class Product(models.Model):
     store = models.ForeignKey(
         "stores.Store",
@@ -51,14 +51,18 @@ class Product(models.Model):
     def __str__(self):
         return self.name
 
+
+# Returns the primary image selected for this product.
     @property
     def primary_image(self):
         return self.images.filter(is_primary=True).first()
 
+# Checks whether the product is currently available in stock.
     @property
     def in_stock(self):
         return self.stock > 0
 
+# Automatically generates a unique SKU before saving a new product.
     def save(self, *args, **kwargs):
         # Generate SKU only if it is empty
         if not self.sku:
@@ -73,6 +77,8 @@ class Product(models.Model):
 
 from cloudinary.models import CloudinaryField
 
+
+# Stores multiple images for each product.
 class ProductImage(models.Model):
     product = models.ForeignKey(
         Product,
@@ -89,7 +95,7 @@ class ProductImage(models.Model):
     def __str__(self):
         return f"Image for {self.product.name}"
 
-
+# Keeps a history of product price and stock changes.
 class ProductHistory(models.Model):
     product    = models.ForeignKey(Product, on_delete=models.CASCADE, related_name='history')
     changed_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True)
@@ -112,6 +118,8 @@ class ProductHistory(models.Model):
 # manual-adjustment reasons from the endpoint contract, plus internal
 # system reasons used only by checkout/cancel/return flows (never
 # accepted directly from the adjust endpoint's request body).
+
+# Records every stock increase or decrease for auditing purposes.
 class StockMovement(models.Model):
     REASON_CHOICES = [
         ('restock', 'Restock'),
@@ -151,7 +159,7 @@ class StockMovement(models.Model):
     def __str__(self):
         return f"{self.product.name}: {self.old_stock} -> {self.new_stock} ({self.reason})"
 
-
+# Stores discount coupons created by the admin.
 class Discount(models.Model):
     TYPE_CHOICES = [
         ('percent', 'Percentage'),
@@ -175,7 +183,7 @@ class Discount(models.Model):
     def __str__(self):
         return self.code
 
-
+# Links products with discount coupons (many-to-many relationship).
 class ProductDiscount(models.Model):
     discount   = models.ForeignKey(Discount, on_delete=models.CASCADE, related_name='product_discounts')
     product    = models.ForeignKey(Product,  on_delete=models.CASCADE, related_name='product_discounts')
@@ -185,7 +193,7 @@ class ProductDiscount(models.Model):
         db_table = 'product_discounts'
         unique_together = ['discount', 'product']
 
-
+# Stores daily sales statistics for each product.
 class ProductStats(models.Model):
     product       = models.ForeignKey(Product, on_delete=models.CASCADE, related_name='stats')
     store         = models.ForeignKey('stores.Store', on_delete=models.CASCADE)

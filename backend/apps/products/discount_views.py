@@ -9,7 +9,8 @@ from .discount_serializers import (
 )
 from apps.users.permissions import IsAdmin
 
-
+# Handles complete CRUD operations for discount coupons.
+# Only admin users can create, update, view, or soft delete discounts.
 class DiscountViewSet(viewsets.ModelViewSet):
     """
     GET/POST    /api/v1/discounts/
@@ -25,10 +26,14 @@ class DiscountViewSet(viewsets.ModelViewSet):
     permission_classes = [permissions.IsAuthenticated, IsAdmin]
     pagination_class = None
 
+# Returns all discounts (both active and inactive)
+# ordered by newest first for the admin panel.
     def get_queryset(self):
         # Admin sees both active and inactive discounts
         return Discount.objects.all().order_by("-created_at")
 
+# Performs a soft delete by marking the discount inactive
+# instead of permanently removing it from the database.
     def perform_destroy(self, instance):
         """
         Soft delete instead of permanently deleting.
@@ -37,6 +42,8 @@ class DiscountViewSet(viewsets.ModelViewSet):
         instance.save(update_fields=["is_active"])
 
 
+# Validates coupon codes submitted during checkout
+# and calculates the applicable discount amount.
 class DiscountValidateView(APIView):
     """
     POST /api/v1/discounts/validate/
@@ -45,6 +52,8 @@ class DiscountValidateView(APIView):
     """
     permission_classes = [permissions.IsAuthenticated]
 
+# Validates the coupon using the serializer,
+# calculates the discount, and returns the final payable amount.
     def post(self, request):
         serializer = DiscountValidateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)

@@ -12,7 +12,8 @@ from .models import Order
 from apps.users.permissions import IsAdmin
 from core.pagination import StandardResultsPagination
 
-
+# Allows customers to submit a return request for an order.
+# Only logged-in users can request returns.
 class CreateReturnView(APIView):
     """
     POST /api/v1/orders/{order_number}/return/
@@ -20,6 +21,8 @@ class CreateReturnView(APIView):
     """
     permission_classes = [permissions.IsAuthenticated]
 
+# Finds the customer's order using the order number.
+# Returns are only allowed after the order has been delivered.
     def post(self, request, order_number):
         try:
             order = Order.objects.get(order_number=order_number, customer__user=request.user)
@@ -32,6 +35,7 @@ class CreateReturnView(APIView):
                 status=status.HTTP_400_BAD_REQUEST
             )
 
+# Prevents creating multiple return requests for the same order.
         if Return.objects.filter(
                order=order,
                status__in=["pending", "approved"]
@@ -41,6 +45,7 @@ class CreateReturnView(APIView):
         serializer = CreateReturnSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
+# Creates a new return request in the database.
         return_request = Return.objects.create(
             order=order,
             customer=order.customer,

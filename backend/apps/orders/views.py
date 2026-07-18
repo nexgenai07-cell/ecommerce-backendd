@@ -30,7 +30,7 @@ from apps.products.models import Product, StockMovement
 from apps.users.permissions import IsAdmin
 
 
-def generate_order_number():
+def generate_order_number(): # Generates a unique order number for every new order.
     year = timezone.now().year
     last_order = (
         Order.objects.filter(order_number__startswith=f"ORD-{year}-")
@@ -46,7 +46,7 @@ def generate_order_number():
 
     return f"ORD-{year}-{new_seq:05d}"
 
-
+# Finds an existing customer profile or creates one for the current user.
 def get_or_create_customer(user, store_id=1):
     customer, _ = Customer.objects.get_or_create(
         user=user,
@@ -59,7 +59,7 @@ def get_or_create_customer(user, store_id=1):
     )
     return customer
 
-
+# Restores stock for all products when an order is cancelled.
 def restore_stock_for_order(order, user=None):
     """
     Shared helper — restores stock for every item in a cancelled order,
@@ -106,10 +106,11 @@ def restore_stock_for_order(order, user=None):
             note=f"Order {order.order_number} cancelled",
         )
 
-
+# Handles checkout by creating an order, deducting stock and creating payment.
 class CheckoutView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
+# Validates cart, creates order, deducts stock, creates payment and clears cart.
     def post(self, request):
         serializer = CheckoutSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
@@ -249,13 +250,13 @@ class CheckoutView(APIView):
             status=status.HTTP_201_CREATED,
         )
 
-
+# Returns all orders belonging to the logged-in customer.
 class OrderListView(generics.ListAPIView):
     serializer_class = OrderListSerializer
     permission_classes = [permissions.IsAuthenticated]
     pagination_class = StandardResultsPagination
 
-    def get_queryset(self):
+    def get_queryset(self): # Fetches customer order history.
         return (
             Order.objects.filter(
                 customer__user=self.request.user
@@ -263,12 +264,13 @@ class OrderListView(generics.ListAPIView):
             .order_by("-created_at")
         )
 
-
+# Returns complete details of a single order.
 class OrderDetailView(generics.RetrieveAPIView):
     serializer_class = OrderDetailSerializer
     permission_classes = [permissions.IsAuthenticated]
     lookup_field = "order_number"
 
+# Restricts customers to their own orders while allowing admins to view all.
     queryset = (
         Order.objects
         .select_related("customer", "store", "payment")
@@ -284,10 +286,12 @@ class OrderDetailView(generics.RetrieveAPIView):
         )
         
         
+# Allows a customer to cancel an order.
 class OrderCancelView(APIView):
     """PUT /api/v1/orders/{order_number}/cancel/"""
     permission_classes = [permissions.IsAuthenticated]
 
+# Cancels order, restores stock and updates payment.
     def put(self, request, order_number):
         try:
             order = Order.objects.get(
@@ -327,11 +331,12 @@ class OrderCancelView(APIView):
 
         return Response(OrderDetailSerializer(order).data)
 
-
+# Returns tracking information for an order.
 class OrderTrackView(APIView):
     """GET /api/v1/orders/{order_number}/track/"""
     permission_classes = [permissions.IsAuthenticated]
 
+# Fetches current order status and tracking number.
     def get(self, request, order_number):
         try:
             if request.user.is_staff:
@@ -364,20 +369,23 @@ class OrderTrackView(APIView):
 # ADMIN VIEWS
 # ============================================================
 
+# Returns all orders for administrators.
 class AdminOrderListView(generics.ListAPIView):
     """GET /api/v1/admin/orders/"""
     serializer_class = AdminOrderListSerializer
     permission_classes = [permissions.IsAuthenticated, IsAdmin]
     pagination_class = StandardResultsPagination
 
+# Retrieves every order in the system.
     def get_queryset(self):
         return Order.objects.all().order_by("-created_at")
 
-
+# Allows admins to update order status.
 class AdminOrderStatusUpdateView(APIView):
     """PUT /api/v1/admin/orders/{order_number}/status/"""
     permission_classes = [permissions.IsAuthenticated, IsAdmin]
 
+# Updates order status, restores stock if cancelled and notifies customer.
     def put(self, request, order_number):
         try:
             order = Order.objects.get(order_number=order_number)
@@ -449,6 +457,7 @@ class AdminOrderStatusUpdateView(APIView):
 
         return Response(OrderDetailSerializer(order).data)
     
+# Returns filtered order list for administrators.
 class AdminOrderFilterView(generics.ListAPIView):
     """
     GET /api/v1/admin/orders/filter/
@@ -466,6 +475,7 @@ class AdminOrderFilterView(generics.ListAPIView):
     permission_classes = [permissions.IsAuthenticated, IsAdmin]
     pagination_class = StandardResultsPagination
 
+# Filters orders using status, customer, dates and search keywords.
     def get_queryset(self):
         qs = (
             Order.objects
@@ -505,6 +515,7 @@ class AdminOrderFilterView(generics.ListAPIView):
 
         return qs
 
+# Returns complete details of any order for administrators.
 class AdminOrderDetailView(generics.RetrieveAPIView):
     serializer_class = OrderDetailSerializer
     permission_classes = [permissions.IsAuthenticated, IsAdmin]

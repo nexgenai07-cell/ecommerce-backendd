@@ -3,7 +3,8 @@
 from django.db import models
 from django.conf import settings
 
-
+# Stores customer information for each store.
+# One user can have different customer profiles in different stores.
 class Customer(models.Model):
     """Store-specific customer profile, auto-created on first order"""
 
@@ -27,6 +28,7 @@ class Customer(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
+# Prevents duplicate customer profiles for the same user or phone number within a store.
     class Meta:
         db_table = "customers"
         unique_together = [
@@ -34,11 +36,13 @@ class Customer(models.Model):
             ("phone", "store"),
         ]
 
+# Returns customer's name and phone number.
     def __str__(self):
         return f"{self.name} ({self.phone})"
 
-
+# Stores the main order information after checkout.
 class Order(models.Model):
+    # Defines all possible order statuses.
     STATUS_CHOICES = [
         ("pending_payment", "Pending Payment"),
         ("confirmed", "Confirmed"),
@@ -94,14 +98,17 @@ class Order(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
+# Orders are displayed with newest orders first.
     class Meta:
         db_table = "orders"
         ordering = ["-created_at"]
 
+# Returns the order number for easy identification.
     def __str__(self):
         return self.order_number
 
-
+# Stores every product purchased in an order.
+# Each row represents one product inside an order.
 class OrderItem(models.Model):
     order = models.ForeignKey(
         Order,
@@ -123,11 +130,14 @@ class OrderItem(models.Model):
     class Meta:
         db_table = "order_items"
 
+# Returns quantity and product name.
     def __str__(self):
         return f"{self.quantity} x {self.product_name}"
 
-
+# Stores payment information for each order.
+# One payment record exists for one order.
 class Payment(models.Model):
+    # Defines different payment statuses.
     STATUS_CHOICES = [
         ("pending", "Pending"),
         ("paid", "Paid"),
@@ -169,6 +179,6 @@ class Payment(models.Model):
 
     class Meta:
         db_table = "payments"
-
+# Returns payment information using order number.
     def __str__(self):
         return f"Payment for {self.order.order_number}"

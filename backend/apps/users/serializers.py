@@ -7,6 +7,9 @@ from .models import User, UserSession
 
 
 class RegisterSerializer(serializers.ModelSerializer):
+# Handles new customer registration by validating input,
+# confirming passwords match, checking duplicate emails,
+# and creating a new customer account.
     """
     Used for public registration.
     Role is always forced to 'customer' — admin cannot be created here.
@@ -42,6 +45,8 @@ class RegisterSerializer(serializers.ModelSerializer):
 
 
 class LoginSerializer(serializers.Serializer):
+# Authenticates user credentials and verifies that
+# the account is active before allowing login.
     email = serializers.EmailField()
     password = serializers.CharField(write_only=True)
 
@@ -62,6 +67,8 @@ class LoginSerializer(serializers.Serializer):
 
 
 class UserProfileSerializer(serializers.ModelSerializer):
+ # Returns the logged-in user's profile information
+# and indicates whether two-factor authentication is enabled.
     """Used for GET /me/ and PUT /me/update/"""
 
     two_factor_enabled = serializers.SerializerMethodField()
@@ -94,6 +101,8 @@ class UserProfileSerializer(serializers.ModelSerializer):
             return False
 
 class PasswordResetRequestSerializer(serializers.Serializer):
+# Validates password reset information and ensures
+# the new password confirmation matches.
     email = serializers.EmailField()
 
     def validate_email(self, value):
@@ -106,6 +115,8 @@ class PasswordResetRequestSerializer(serializers.Serializer):
 
 
 class PasswordResetConfirmSerializer(serializers.Serializer):
+# Verifies the current password before allowing
+# the user to update it with a new secure password.
     token = serializers.CharField()
     uid = serializers.CharField()
     new_password = serializers.CharField(validators=[validate_password])
@@ -143,6 +154,8 @@ class ChangePasswordSerializer(serializers.Serializer):
 
 
 class DeleteAccountSerializer(serializers.Serializer):
+# Confirms the user's password before allowing
+# permanent account deletion.
     """Requires the user's password as confirmation before deleting — prevents
     accidental deletion or deletion by someone who briefly has device access."""
     password = serializers.CharField(write_only=True)
@@ -156,6 +169,8 @@ class DeleteAccountSerializer(serializers.Serializer):
 
 class UserSessionSerializer(serializers.ModelSerializer):
     """Used by GET /sessions/ to list a user's active logins (devices/browsers)."""
+# Formats active login sessions and identifies
+# which session belongs to the current device.
 
     # FIX: "is_current" field ADD kiya gaya — pehle ye field exist hi nahi
     # karta tha, jab ke Requirements doc ke sample response mein

@@ -35,7 +35,7 @@ from .serializers import (
     UserSessionSerializer,
 )
 
-
+# Generates JWT access and refresh tokens for an authenticated user.
 def get_tokens_for_user(user):
     refresh = RefreshToken.for_user(user)
     return {
@@ -43,14 +43,15 @@ def get_tokens_for_user(user):
         "refresh": str(refresh),
     }
 
-
+# Retrieves the client's IP address from the incoming request.
 def get_client_ip(request):
     x_forwarded_for = request.META.get("HTTP_X_FORWARDED_FOR")
     if x_forwarded_for:
         return x_forwarded_for.split(",")[0].strip()
     return request.META.get("REMOTE_ADDR")
 
-
+# Stores information about the user's current login session,
+# including device, browser, IP address, and JWT token IDs.
 def create_session_record(request, user, refresh_token, access_token=None):
     ua_string = request.META.get("HTTP_USER_AGENT", "")
     ua = parse_user_agent(ua_string)
@@ -77,7 +78,8 @@ def create_session_record(request, user, refresh_token, access_token=None):
         location="Unknown",
     )
 
-
+# Generates an email verification token and sends
+# a verification link to the user's email.
 def send_verification_email(user):
     verification = EmailVerification.create_for_user(user)
 
@@ -98,7 +100,8 @@ def send_verification_email(user):
         fail_silently=True,
     )
 
-
+# Handles new user registration and sends an email
+# verification link after creating the account.
 class RegisterView(generics.CreateAPIView):
     queryset = User.objects.all()
     serializer_class = RegisterSerializer
@@ -128,7 +131,8 @@ class RegisterView(generics.CreateAPIView):
             status=status.HTTP_201_CREATED,
         )
 
-
+# Authenticates users, verifies email status,
+# checks two-factor authentication, and returns JWT tokens.
 class LoginView(APIView):
     permission_classes = [permissions.AllowAny]
 
@@ -185,7 +189,8 @@ class LoginView(APIView):
             },
             status=status.HTTP_200_OK,
         )
-        
+# Logs out the current user by blacklisting
+# the provided refresh token.
 class LogoutView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
@@ -212,7 +217,8 @@ class LogoutView(APIView):
             status=status.HTTP_200_OK,
         )
 
-
+# Sends a password reset link to the user's
+# registered email address.
 class PasswordResetRequestView(APIView):
     permission_classes = [permissions.AllowAny]
 
@@ -252,7 +258,8 @@ class PasswordResetRequestView(APIView):
             status=status.HTTP_200_OK,
         )
 
-
+# Verifies the password reset token and
+# updates the user's password.
 class PasswordResetConfirmView(APIView):
     permission_classes = [permissions.AllowAny]
 
@@ -296,7 +303,7 @@ class PasswordResetConfirmView(APIView):
             status=status.HTTP_200_OK,
         )
 
-
+# Returns and updates the authenticated user's profile.
 class MeView(generics.RetrieveUpdateAPIView):
     serializer_class = UserProfileSerializer
     permission_classes = [permissions.IsAuthenticated]
@@ -304,6 +311,8 @@ class MeView(generics.RetrieveUpdateAPIView):
     def get_object(self):
         return self.request.user
     
+# Allows authenticated users to securely
+# change their password.
 class ChangePasswordView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
@@ -323,7 +332,8 @@ class ChangePasswordView(APIView):
             status=status.HTTP_200_OK,
         )
 
-
+# Soft deletes the user account and revokes
+# all active JWT sessions.
 class DeleteAccountView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
@@ -353,7 +363,8 @@ class DeleteAccountView(APIView):
             status=status.HTTP_200_OK,
         )
 
-
+# Returns all active login sessions
+# belonging to the authenticated user.
 class SessionListView(generics.ListAPIView):
     serializer_class = UserSessionSerializer
     permission_classes = [permissions.IsAuthenticated]
@@ -361,7 +372,8 @@ class SessionListView(generics.ListAPIView):
     def get_queryset(self):
         return UserSession.objects.filter(user=self.request.user)
 
-
+# Signs the user out from every device by
+# blacklisting all tokens and removing session records.
 class RevokeAllSessionsView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 

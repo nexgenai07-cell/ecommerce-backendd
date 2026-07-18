@@ -4,6 +4,9 @@
 #
 # Required pip installs:
 #   pip install pyotp qrcode pillow
+# Handles the complete Two-Factor Authentication (2FA) process,
+# including enabling 2FA, verifying OTPs, disabling 2FA,
+# and completing secure login using OTP verification.
 
 import pyotp
 import qrcode
@@ -17,7 +20,9 @@ from rest_framework_simplejwt.tokens import RefreshToken
 from .models import TwoFactorAuth, User
 from .serializers import UserProfileSerializer
 
-
+# Generates a unique secret key and QR code for the user to scan
+# with an authenticator app. This starts the 2FA setup process
+# but does not enable 2FA until OTP verification succeeds.
 class Enable2FAView(APIView):
     """
     POST /api/v1/auth/2fa/enable/
@@ -64,7 +69,8 @@ class Enable2FAView(APIView):
             'manual_entry_key': secret,  # shown as fallback if user can't scan
         }, status=status.HTTP_200_OK)
 
-
+# Verifies the OTP entered by the user after scanning the QR code.
+# If the OTP is valid, Two-Factor Authentication is officially enabled.
 class Verify2FAView(APIView):
     """
     POST /api/v1/auth/2fa/verify/
@@ -101,7 +107,8 @@ class Verify2FAView(APIView):
 
         return Response({'message': 'Two-factor authentication enabled successfully.'}, status=status.HTTP_200_OK)
 
-
+# Disables Two-Factor Authentication after confirming
+# the user's password for security.
 class Disable2FAView(APIView):
     """
     POST /api/v1/auth/2fa/disable/
@@ -119,7 +126,8 @@ class Disable2FAView(APIView):
 
         return Response({'message': 'Two-factor authentication disabled.'}, status=status.HTTP_200_OK)
 
-
+# Completes the login process by verifying the OTP.
+# JWT tokens are generated only after successful OTP verification.
 class TwoFactorLoginVerifyView(APIView):
     """
     POST /api/v1/auth/2fa/login-verify/

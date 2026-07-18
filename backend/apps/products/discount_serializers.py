@@ -3,7 +3,8 @@ from django.utils import timezone
 
 from .models import Discount
 
-
+# Serializes discount data for creating, updating,
+# and retrieving discount coupons.
 class DiscountSerializer(serializers.ModelSerializer):
     class Meta:
         model = Discount
@@ -25,6 +26,8 @@ class DiscountSerializer(serializers.ModelSerializer):
             "updated_at",
         ]
 
+# Validates that the discount end date
+# is later than the start date.
     def validate(self, data):
         start = data.get(
             "start_date",
@@ -42,12 +45,16 @@ class DiscountSerializer(serializers.ModelSerializer):
 
         return data
 
+# Automatically assigns the logged-in admin's store
+# before creating the discount.
     def create(self, validated_data):
         request = self.context["request"]
         validated_data["store"] = request.user.stores.first()
         return super().create(validated_data)
 
 
+# Validates coupon codes during checkout
+# before applying any discount.
 class DiscountValidateSerializer(serializers.Serializer):
     """
     Used for POST /api/v1/discounts/validate/
@@ -58,7 +65,9 @@ class DiscountValidateSerializer(serializers.Serializer):
         max_digits=10,
         decimal_places=2,
     )
-
+# Checks whether the coupon exists, is active,
+# has not expired, and satisfies the minimum
+# order amount before allowing its use.
     def validate(self, data):
         try:
             # Only ACTIVE discounts are valid.
