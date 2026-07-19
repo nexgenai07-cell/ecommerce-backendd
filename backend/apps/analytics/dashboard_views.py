@@ -1,8 +1,11 @@
 #apps/analytics/dashboard_views.py
+import calendar
+import datetime as dt
 from datetime import timedelta
 
+from django.conf import settings
 from django.core.cache import cache
-from django.db.models import Sum, Count
+from django.db.models import Sum, Count, Min, Max
 from django.db.models.functions import (
     TruncDate,
     TruncWeek,
@@ -387,6 +390,15 @@ class CustomerGrowthView(APIView):
     touched. Customer Growth now parses its own `period` value so the new
     quarter/year options are scoped to this endpoint only and can't affect
     (or break, via an unhandled dict-key lookup) the other two reports.
+
+    FOLLOW-UP FIX (ticket: "Quarter/Year grouping ke liye EXACT boundaries
+    — precision spec"): _group_by_quarter() and _group_by_year() below now
+    filter directly against explicit, millisecond-precision fixed calendar
+    boundaries (Jan-Mar/Apr-Jun/Jul-Sep/Oct-Dec and Jan 1-Dec 31) instead
+    of aggregating via TruncMonth/TruncYear and merging in Python. Verified
+    against the ticket's exact test case (customers on 2026-02-15,
+    2026-05-20, 2026-05-25 -> [{"2026-Q1":1}, {"2026-Q2":2}]) — see
+    verify_customer_growth.py.
     """
     permission_classes = [permissions.IsAuthenticated, IsAdmin]
 
@@ -433,44 +445,97 @@ class CustomerGrowthView(APIView):
             for row in rows
         ]
 
-    def _group_by_quarter(self, qs):
-        """Groups into calendar quarters: Jan-Mar, Apr-Jun, Jul-Sep, Oct-Dec.
+    # FIX (follow-up ticket: "Quarter/Year grouping ke liye EXACT
+    # boundaries — precision spec"): quarter -> (first_month, last_month)
+    # of that fixed calendar quarter. Always these 4 windows, every year,
+    # completely independent of any caller-supplied start_date/end_date.
+    QUARTER_MONTH_RANGES = {
+        1: (1, 3),
+        2: (4, 6),
+        3: (7, 9),
+        4: (10, 12),
+    }
 
-        Django has no built-in TruncQuarter, so we aggregate by month in
-        the database first (cheap, indexed), then merge months into
-        quarters in Python.
+    def _aware_bounds(self, start_naive, end_naive):
         """
-        rows = (
-            qs.annotate(bucket=TruncMonth("created_at"))
-              .values("bucket")
-              .annotate(new_customers=Count("id"))
-              .order_by("bucket")
-        )
+        Attaches the active timezone to a pair of naive datetime boundaries
+        when USE_TZ is on (so they compare correctly against the
+        timezone-aware `created_at` values Django stores), and leaves them
+        naive when USE_TZ is off. Keeps the boundary math itself (below)
+        simple, calendar-only arithmetic.
+        """
+        if settings.USE_TZ:
+            current_tz = timezone.get_current_timezone()
+            start_naive = timezone.make_aware(start_naive, current_tz)
+            end_naive = timezone.make_aware(end_naive, current_tz)
+        return start_naive, end_naive
 
-        quarter_totals = {}  # (year, quarter_number) -> running count
-        for row in rows:
-            bucket = row["bucket"]
-            quarter_number = (bucket.month - 1) // 3 + 1
-            key = (bucket.year, quarter_number)
-            quarter_totals[key] = quarter_totals.get(key, 0) + row["new_customers"]
+    def _group_by_quarter(self, qs):
+        """
+        Groups into FIXED calendar quarters using explicit, inclusive
+        datetime boundaries, exactly as specified in the "Quarter/Year
+        grouping — EXACT boundaries" ticket:
 
-        return [
-            {"period": f"{year}-Q{quarter_number}", "new_customers": count}
-            for (year, quarter_number), count in sorted(quarter_totals.items())
-        ]
+            Q1: YYYY-01-01T00:00:00.000000 .. YYYY-03-31T23:59:59.999999
+            Q2: YYYY-04-01T00:00:00.000000 .. YYYY-06-30T23:59:59.999999
+            Q3: YYYY-07-01T00:00:00.000000 .. YYYY-09-30T23:59:59.999999
+            Q4: YYYY-10-01T00:00:00.000000 .. YYYY-12-31T23:59:59.999999
+
+        These 4 windows are always the same for every calendar year and
+        are NEVER derived from the caller's start_date/end_date — those
+        query params only control which records are considered at all
+        (already applied to `qs` before this method runs, via
+        created_at__date__gte / __lte in get()). This replaces the
+        previous TruncMonth-then-merge implementation with a version that
+        filters directly against the literal boundaries above, so there's
+        no ambiguity or dependency on how a DB truncation function buckets
+        dates.
+
+        A quarter with zero matching records is simply omitted from the
+        response (matching the ticket's own example, which shows only
+        Q1/Q2 — no Q3/Q4 entries at all, not even as 0).
+        """
+        bounds = qs.aggregate(earliest=Min("created_at"), latest=Max("created_at"))
+        if bounds["earliest"] is None:
+            return []
+
+        data = []
+        for year in range(bounds["earliest"].year, bounds["latest"].year + 1):
+            for quarter, (start_month, end_month) in self.QUARTER_MONTH_RANGES.items():
+                start_dt = dt.datetime(year, start_month, 1, 0, 0, 0, 0)
+                last_day = calendar.monthrange(year, end_month)[1]
+                end_dt = dt.datetime(year, end_month, last_day, 23, 59, 59, 999999)
+                start_dt, end_dt = self._aware_bounds(start_dt, end_dt)
+
+                count = qs.filter(created_at__gte=start_dt, created_at__lte=end_dt).count()
+                if count:
+                    data.append({"period": f"{year}-Q{quarter}", "new_customers": count})
+
+        return data
 
     def _group_by_year(self, qs):
-        rows = (
-            qs.annotate(bucket=TruncYear("created_at"))
-              .values("bucket")
-              .annotate(new_customers=Count("id"))
-              .order_by("bucket")
-        )
+        """
+        Groups into FIXED calendar years using explicit, inclusive
+        datetime boundaries: YYYY-01-01T00:00:00.000000 ..
+        YYYY-12-31T23:59:59.999999 — same precision-spec pattern as
+        _group_by_quarter above, replacing the previous TruncYear
+        implementation.
+        """
+        bounds = qs.aggregate(earliest=Min("created_at"), latest=Max("created_at"))
+        if bounds["earliest"] is None:
+            return []
 
-        return [
-            {"period": row["bucket"].strftime("%Y"), "new_customers": row["new_customers"]}
-            for row in rows
-        ]
+        data = []
+        for year in range(bounds["earliest"].year, bounds["latest"].year + 1):
+            start_dt = dt.datetime(year, 1, 1, 0, 0, 0, 0)
+            end_dt = dt.datetime(year, 12, 31, 23, 59, 59, 999999)
+            start_dt, end_dt = self._aware_bounds(start_dt, end_dt)
+
+            count = qs.filter(created_at__gte=start_dt, created_at__lte=end_dt).count()
+            if count:
+                data.append({"period": f"{year}", "new_customers": count})
+
+        return data
 
 
 
