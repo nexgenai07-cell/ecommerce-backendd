@@ -20,26 +20,56 @@ class DiscountViewSet(viewsets.ModelViewSet):
 
     DELETE is a SOFT DELETE:
     Instead of removing the row, is_active=False.
+
+    FIX (ticket: "Discount Delete — Convert to Soft Delete, same as
+    Category/Product"):
+      1. DELETE already stopped hard-deleting the row and already set
+         is_active=False here — that part was correct. Response shape
+         is untouched (still the default 204 No Content), as requested.
+      2. GET /discounts/ (admin list) already returns ALL coupons
+         (active + inactive) via get_queryset() below — no change
+         needed, confirmed.
+      3. Checkout coupon validation already rejects inactive/soft-deleted
+         coupons — see DiscountValidateSerializer.validate() in
+         discount_serializers.py, which filters is_active=True. Confirmed,
+         no change needed.
+      4. RESTORE already works via the existing PUT /discounts/{id}/
+         endpoint: 'is_active' is writable on DiscountSerializer (not in
+         read_only_fields), so sending {"is_active": true} on update
+         reactivates a coupon. No new endpoint added, as requested.
+
+      The one actual bug fixed here: perform_destroy() was calling
+      instance.save(update_fields=["is_active"]). Because
+      Discount.updated_at uses auto_now=True, Django only writes columns
+      listed in update_fields — so updated_at was silently NOT being
+      persisted to the database on soft-delete, breaking the "last
+      modified" audit trail. Fixed by including "updated_at" in
+      update_fields below.
     """
 
     serializer_class = DiscountSerializer
     permission_classes = [permissions.IsAuthenticated, IsAdmin]
     pagination_class = None
 
-# Returns all discounts (both active and inactive)
-# ordered by newest first for the admin panel.
+    # Returns all discounts (both active and inactive)
+    # ordered by newest first for the admin panel.
     def get_queryset(self):
         # Admin sees both active and inactive discounts
         return Discount.objects.all().order_by("-created_at")
 
-# Performs a soft delete by marking the discount inactive
-# instead of permanently removing it from the database.
+    # Performs a soft delete by marking the discount inactive
+    # instead of permanently removing it from the database.
     def perform_destroy(self, instance):
         """
         Soft delete instead of permanently deleting.
+
+        FIX: update_fields now includes "updated_at" as well as
+        "is_active" — previously only "is_active" was listed, which
+        meant the auto_now updated_at timestamp was computed in memory
+        but never written to the database on delete/restore.
         """
         instance.is_active = False
-        instance.save(update_fields=["is_active"])
+        instance.save(update_fields=["is_active", "updated_at"])
 
 
 # Validates coupon codes submitted during checkout
@@ -52,8 +82,8 @@ class DiscountValidateView(APIView):
     """
     permission_classes = [permissions.IsAuthenticated]
 
-# Validates the coupon using the serializer,
-# calculates the discount, and returns the final payable amount.
+    # Validates the coupon using the serializer,
+    # calculates the discount, and returns the final payable amount.
     def post(self, request):
         serializer = DiscountValidateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)

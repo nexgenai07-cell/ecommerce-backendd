@@ -25,9 +25,15 @@ class DiscountSerializer(serializers.ModelSerializer):
             "created_at",
             "updated_at",
         ]
+        # NOTE (ticket: Discount Delete — soft delete): "is_active" is
+        # intentionally NOT in read_only_fields. This is what makes the
+        # RESTORE flow work with no new endpoint — PUT /discounts/{id}/
+        # with {"is_active": true} in the body reactivates a
+        # soft-deleted coupon via this serializer. Confirmed already
+        # correct; left as-is.
 
-# Validates that the discount end date
-# is later than the start date.
+    # Validates that the discount end date
+    # is later than the start date.
     def validate(self, data):
         start = data.get(
             "start_date",
@@ -45,8 +51,8 @@ class DiscountSerializer(serializers.ModelSerializer):
 
         return data
 
-# Automatically assigns the logged-in admin's store
-# before creating the discount.
+    # Automatically assigns the logged-in admin's store
+    # before creating the discount.
     def create(self, validated_data):
         request = self.context["request"]
         validated_data["store"] = request.user.stores.first()
@@ -65,9 +71,16 @@ class DiscountValidateSerializer(serializers.Serializer):
         max_digits=10,
         decimal_places=2,
     )
-# Checks whether the coupon exists, is active,
-# has not expired, and satisfies the minimum
-# order amount before allowing its use.
+
+    # Checks whether the coupon exists, is active,
+    # has not expired, and satisfies the minimum
+    # order amount before allowing its use.
+    #
+    # NOTE (ticket: Discount Delete — soft delete): this query already
+    # filters is_active=True, so a soft-deleted coupon (is_active=False)
+    # already falls into the DoesNotExist branch below and is rejected
+    # with "Invalid or inactive coupon code." Confirmed already correct;
+    # no change needed here.
     def validate(self, data):
         try:
             # Only ACTIVE discounts are valid.

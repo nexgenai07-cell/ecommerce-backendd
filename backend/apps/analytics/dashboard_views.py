@@ -26,6 +26,14 @@ def parse_date_range(request):
     ?start_date=
     ?end_date=
     ?period=daily|weekly|monthly|yearly
+
+    NOTE: This shared helper is used by SalesReportView, RevenueReportView,
+    and OrdersAnalyticsView. Per the "Customer Growth — add quarter/year"
+    ticket, this is intentionally left UNCHANGED — those endpoints were
+    only ever tested with daily/weekly/monthly and should keep behaving
+    exactly as before. CustomerGrowthView below has its own, separate
+    period parsing so the new "quarter" / "year" values don't leak into
+    (and potentially break) this shared helper or get_trunc_function().
     """
     start_date = request.query_params.get("start_date")
     end_date = request.query_params.get("end_date")
@@ -357,31 +365,112 @@ class LowPerformingProductsView(APIView):
 
 
 class CustomerGrowthView(APIView):
-    """GET /api/v1/analytics/customers/growth/?start_date=&end_date=&period=daily|weekly|monthly"""
+    """
+    GET /api/v1/analytics/customers/growth/?start_date=&end_date=&period=daily|weekly|monthly|quarter|year
+
+    FIX (ticket: "Feature Request — Customer Growth API mein 'quarter' aur
+    'year' period values add karein"):
+
+    Previously this view only recognized daily/weekly/monthly and silently
+    fell back to TruncDate (daily) for anything else — so "quarter" and
+    "year" were quietly grouped as daily/near-daily data instead of proper
+    quarterly/yearly buckets.
+
+    "quarter" and "year" are now supported, returning the same
+    [{period, new_customers}] shape as the existing periods:
+        quarter -> {"period": "2026-Q1", "new_customers": 45}
+        year    -> {"period": "2026",    "new_customers": 320}
+
+    This view intentionally does NOT reuse the shared parse_date_range() /
+    get_trunc_function() helpers from above — those also back Sales Report
+    and Revenue Report, which the ticket explicitly asked not to be
+    touched. Customer Growth now parses its own `period` value so the new
+    quarter/year options are scoped to this endpoint only and can't affect
+    (or break, via an unhandled dict-key lookup) the other two reports.
+    """
     permission_classes = [permissions.IsAuthenticated, IsAdmin]
 
+    VALID_PERIODS = ["daily", "weekly", "monthly", "quarter", "year"]
 
     def get(self, request):
-        start_date, end_date, period = parse_date_range(request)
+        start_date = request.query_params.get("start_date")
+        end_date = request.query_params.get("end_date")
+        period = request.query_params.get("period", "daily").lower()
+
+        if period not in self.VALID_PERIODS:
+            period = "daily"
+
         qs = Customer.objects.all()
         if start_date:
             qs = qs.filter(created_at__date__gte=start_date)
         if end_date:
             qs = qs.filter(created_at__date__lte=end_date)
 
+        if period == "quarter":
+            data = self._group_by_quarter(qs)
+        elif period == "year":
+            data = self._group_by_year(qs)
+        else:
+            data = self._group_by_simple_period(qs, period)
 
-        trunc_fn = {'daily': TruncDate, 'weekly': TruncWeek, 'monthly': TruncMonth}.get(period, TruncDate)
+        return Response(data)
 
+    def _group_by_simple_period(self, qs, period):
+        """daily / weekly / monthly — same grouping as before, just with
+        explicit string formatting instead of relying on default date
+        serialization."""
+        trunc_fn = {"daily": TruncDate, "weekly": TruncWeek, "monthly": TruncMonth}[period]
 
-        data = (
-            qs.annotate(period=trunc_fn('created_at'))
-              .values('period')
-              .annotate(new_customers=Count('id'))
-              .order_by('period')
+        rows = (
+            qs.annotate(bucket=trunc_fn("created_at"))
+              .values("bucket")
+              .annotate(new_customers=Count("id"))
+              .order_by("bucket")
         )
 
+        return [
+            {"period": row["bucket"].strftime("%Y-%m-%d"), "new_customers": row["new_customers"]}
+            for row in rows
+        ]
 
-        return Response(list(data))
+    def _group_by_quarter(self, qs):
+        """Groups into calendar quarters: Jan-Mar, Apr-Jun, Jul-Sep, Oct-Dec.
+
+        Django has no built-in TruncQuarter, so we aggregate by month in
+        the database first (cheap, indexed), then merge months into
+        quarters in Python.
+        """
+        rows = (
+            qs.annotate(bucket=TruncMonth("created_at"))
+              .values("bucket")
+              .annotate(new_customers=Count("id"))
+              .order_by("bucket")
+        )
+
+        quarter_totals = {}  # (year, quarter_number) -> running count
+        for row in rows:
+            bucket = row["bucket"]
+            quarter_number = (bucket.month - 1) // 3 + 1
+            key = (bucket.year, quarter_number)
+            quarter_totals[key] = quarter_totals.get(key, 0) + row["new_customers"]
+
+        return [
+            {"period": f"{year}-Q{quarter_number}", "new_customers": count}
+            for (year, quarter_number), count in sorted(quarter_totals.items())
+        ]
+
+    def _group_by_year(self, qs):
+        rows = (
+            qs.annotate(bucket=TruncYear("created_at"))
+              .values("bucket")
+              .annotate(new_customers=Count("id"))
+              .order_by("bucket")
+        )
+
+        return [
+            {"period": row["bucket"].strftime("%Y"), "new_customers": row["new_customers"]}
+            for row in rows
+        ]
 
 
 
