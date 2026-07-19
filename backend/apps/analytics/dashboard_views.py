@@ -411,10 +411,22 @@ class CustomerGrowthView(APIView):
               .order_by("bucket")
         )
 
-        return [
-            {"period": row["bucket"].strftime("%Y-%m-%d"), "new_customers": row["new_customers"]}
-            for row in rows
-        ]
+        result = []
+
+        for row in rows:
+            bucket = row["bucket"]
+
+            if period == "monthly":
+                period_value = bucket.strftime("%Y-%m")
+            else:
+                period_value = bucket.strftime("%Y-%m-%d")
+
+            result.append({
+                "period": period_value,
+                "new_customers": row["new_customers"],
+            })
+
+        return result
 
     QUARTER_MONTH_RANGES = {
         1: (1, 3),
