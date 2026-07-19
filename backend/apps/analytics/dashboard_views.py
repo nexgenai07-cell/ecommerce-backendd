@@ -370,35 +370,6 @@ class LowPerformingProductsView(APIView):
 class CustomerGrowthView(APIView):
     """
     GET /api/v1/analytics/customers/growth/?start_date=&end_date=&period=daily|weekly|monthly|quarter|year
-
-    FIX (ticket: "Feature Request — Customer Growth API mein 'quarter' aur
-    'year' period values add karein"):
-
-    Previously this view only recognized daily/weekly/monthly and silently
-    fell back to TruncDate (daily) for anything else — so "quarter" and
-    "year" were quietly grouped as daily/near-daily data instead of proper
-    quarterly/yearly buckets.
-
-    "quarter" and "year" are now supported, returning the same
-    [{period, new_customers}] shape as the existing periods:
-        quarter -> {"period": "2026-Q1", "new_customers": 45}
-        year    -> {"period": "2026",    "new_customers": 320}
-
-    This view intentionally does NOT reuse the shared parse_date_range() /
-    get_trunc_function() helpers from above — those also back Sales Report
-    and Revenue Report, which the ticket explicitly asked not to be
-    touched. Customer Growth now parses its own `period` value so the new
-    quarter/year options are scoped to this endpoint only and can't affect
-    (or break, via an unhandled dict-key lookup) the other two reports.
-
-    FOLLOW-UP FIX (ticket: "Quarter/Year grouping ke liye EXACT boundaries
-    — precision spec"): _group_by_quarter() and _group_by_year() below now
-    filter directly against explicit, millisecond-precision fixed calendar
-    boundaries (Jan-Mar/Apr-Jun/Jul-Sep/Oct-Dec and Jan 1-Dec 31) instead
-    of aggregating via TruncMonth/TruncYear and merging in Python. Verified
-    against the ticket's exact test case (customers on 2026-02-15,
-    2026-05-20, 2026-05-25 -> [{"2026-Q1":1}, {"2026-Q2":2}]) — see
-    verify_customer_growth.py.
     """
     permission_classes = [permissions.IsAuthenticated, IsAdmin]
 
@@ -445,10 +416,6 @@ class CustomerGrowthView(APIView):
             for row in rows
         ]
 
-    # FIX (follow-up ticket: "Quarter/Year grouping ke liye EXACT
-    # boundaries — precision spec"): quarter -> (first_month, last_month)
-    # of that fixed calendar quarter. Always these 4 windows, every year,
-    # completely independent of any caller-supplied start_date/end_date.
     QUARTER_MONTH_RANGES = {
         1: (1, 3),
         2: (4, 6),
@@ -457,13 +424,6 @@ class CustomerGrowthView(APIView):
     }
 
     def _aware_bounds(self, start_naive, end_naive):
-        """
-        Attaches the active timezone to a pair of naive datetime boundaries
-        when USE_TZ is on (so they compare correctly against the
-        timezone-aware `created_at` values Django stores), and leaves them
-        naive when USE_TZ is off. Keeps the boundary math itself (below)
-        simple, calendar-only arithmetic.
-        """
         if settings.USE_TZ:
             current_tz = timezone.get_current_timezone()
             start_naive = timezone.make_aware(start_naive, current_tz)
@@ -472,44 +432,54 @@ class CustomerGrowthView(APIView):
 
     def _group_by_quarter(self, qs):
         """
-        Groups into FIXED calendar quarters using explicit, inclusive
-        datetime boundaries, exactly as specified in the "Quarter/Year
-        grouping — EXACT boundaries" ticket:
+        Groups into FIXED calendar quarters using exact calendar boundaries.
 
-            Q1: YYYY-01-01T00:00:00.000000 .. YYYY-03-31T23:59:59.999999
-            Q2: YYYY-04-01T00:00:00.000000 .. YYYY-06-30T23:59:59.999999
-            Q3: YYYY-07-01T00:00:00.000000 .. YYYY-09-30T23:59:59.999999
-            Q4: YYYY-10-01T00:00:00.000000 .. YYYY-12-31T23:59:59.999999
+        Q1: Jan 1  -> Mar 31
+        Q2: Apr 1  -> Jun 30
+        Q3: Jul 1  -> Sep 30
+        Q4: Oct 1  -> Dec 31
 
-        These 4 windows are always the same for every calendar year and
-        are NEVER derived from the caller's start_date/end_date — those
-        query params only control which records are considered at all
-        (already applied to `qs` before this method runs, via
-        created_at__date__gte / __lte in get()). This replaces the
-        previous TruncMonth-then-merge implementation with a version that
-        filters directly against the literal boundaries above, so there's
-        no ambiguity or dependency on how a DB truncation function buckets
-        dates.
-
-        A quarter with zero matching records is simply omitted from the
-        response (matching the ticket's own example, which shows only
-        Q1/Q2 — no Q3/Q4 entries at all, not even as 0).
+        start_date/end_date only filter which records are considered.
+        Grouping itself always uses fixed calendar quarters. Upper bounds
+        use an exclusive "start of next period" (created_at__lt=next_dt)
+        rather than an inclusive 23:59:59.999999 end, which sidesteps any
+        microsecond-rounding edge cases entirely.
         """
-        bounds = qs.aggregate(earliest=Min("created_at"), latest=Max("created_at"))
+        bounds = qs.aggregate(
+            earliest=Min("created_at"),
+            latest=Max("created_at"),
+        )
+
         if bounds["earliest"] is None:
             return []
 
         data = []
-        for year in range(bounds["earliest"].year, bounds["latest"].year + 1):
-            for quarter, (start_month, end_month) in self.QUARTER_MONTH_RANGES.items():
-                start_dt = dt.datetime(year, start_month, 1, 0, 0, 0, 0)
-                last_day = calendar.monthrange(year, end_month)[1]
-                end_dt = dt.datetime(year, end_month, last_day, 23, 59, 59, 999999)
-                start_dt, end_dt = self._aware_bounds(start_dt, end_dt)
 
-                count = qs.filter(created_at__gte=start_dt, created_at__lte=end_dt).count()
+        for year in range(bounds["earliest"].year, bounds["latest"].year + 1):
+
+            for quarter, (start_month, end_month) in self.QUARTER_MONTH_RANGES.items():
+
+                start_dt = dt.datetime(year, start_month, 1)
+
+                if quarter == 4:
+                    next_dt = dt.datetime(year + 1, 1, 1)
+                else:
+                    next_dt = dt.datetime(year, end_month + 1, 1)
+
+                start_dt, next_dt = self._aware_bounds(start_dt, next_dt)
+
+                count = qs.filter(
+                    created_at__gte=start_dt,
+                    created_at__lt=next_dt,
+                ).count()
+
                 if count:
-                    data.append({"period": f"{year}-Q{quarter}", "new_customers": count})
+                    data.append(
+                        {
+                            "period": f"{year}-Q{quarter}",
+                            "new_customers": count,
+                        }
+                    )
 
         return data
 
@@ -527,11 +497,12 @@ class CustomerGrowthView(APIView):
 
         data = []
         for year in range(bounds["earliest"].year, bounds["latest"].year + 1):
-            start_dt = dt.datetime(year, 1, 1, 0, 0, 0, 0)
-            end_dt = dt.datetime(year, 12, 31, 23, 59, 59, 999999)
-            start_dt, end_dt = self._aware_bounds(start_dt, end_dt)
+            start_dt = dt.datetime(year, 1, 1)
+            next_dt = dt.datetime(year + 1, 1, 1)
 
-            count = qs.filter(created_at__gte=start_dt, created_at__lte=end_dt).count()
+            start_dt, next_dt = self._aware_bounds(start_dt, next_dt)
+            
+            count = qs.filter(created_at__gte=start_dt, created_at__lt=next_dt,).count()
             if count:
                 data.append({"period": f"{year}", "new_customers": count})
 
@@ -558,16 +529,6 @@ class AnalyticsExportView(APIView):
     """
     GET /api/v1/analytics/export/?start_date=&end_date=
     Returns a CSV file of orders within the date range.
-    NOTE: For large datasets this should move to a Celery background task
-    that emails/links the file instead of generating it synchronously.
-
-
-    FIX (Postman testing — 09 Jul 2026): crashed with AttributeError
-    because Order has no `payment_method` field — payment info lives on
-    the related Payment model (order.payment), which may not even exist
-    for every order (e.g. cancelled/unpaid orders). Now reads the
-    payment status safely via hasattr, falling back to "N/A", and drops
-    the non-existent payment_method column from the CSV header/rows.
     """
     permission_classes = [permissions.IsAuthenticated, IsAdmin]
 
