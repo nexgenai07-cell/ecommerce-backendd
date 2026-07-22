@@ -15,24 +15,46 @@ from apps.products.models import Discount
 from apps.stores.models import Store
 
 
-def get_or_create_cart(user):
-    """Each user has exactly one cart — single-store setup always uses the one store"""
-    cart, _ = Cart.objects.get_or_create(user=user, defaults={'store': Store.objects.first()})
+def get_or_create_cart_for_request(request):
+    """
+    FIX: ab user aur session_key dono support karta hai.
+    - Logged-in user: cart unke account se link hota hai (jaisa pehle tha).
+    - Anonymous: request header 'X-Session-Key' se session_key liya jata hai
+      (frontend/WhatsApp ye header bhejega jo chat session ka session_key hoga).
+    Agar dono missing hon, error raise hota hai.
+
+    NOTE: Do not revert this back to IsAuthenticated-only / user-based lookup.
+    Anonymous/guest carts (WhatsApp flow) depend on the X-Session-Key path.
+    """
+    store = Store.objects.first()
+
+    if request.user and request.user.is_authenticated:
+        cart, _ = Cart.objects.get_or_create(user=request.user, store=store)
+        return cart
+
+    session_key = request.headers.get('X-Session-Key')
+    if not session_key:
+        return None
+
+    cart, _ = Cart.objects.get_or_create(session_key=session_key, store=store)
     return cart
 
 
 class CartView(APIView):
     """GET /api/v1/cart/"""
-    permission_classes = [permissions.IsAuthenticated]
+    # FIX: AllowAny — anonymous users bhi apna cart dekh sakein (session_key se)
+    permission_classes = [permissions.AllowAny]
 
     def get(self, request):
-        cart = get_or_create_cart(request.user)
+        cart = get_or_create_cart_for_request(request)
+        if cart is None:
+            return Response({'error': 'Login required or X-Session-Key header missing.'}, status=status.HTTP_400_BAD_REQUEST)
         return Response(CartSerializer(cart).data)
 
 
 class AddToCartView(APIView):
     """POST /api/v1/cart/add/"""
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.AllowAny]
 
     def post(self, request):
         serializer = AddToCartSerializer(data=request.data)
@@ -40,7 +62,9 @@ class AddToCartView(APIView):
         product = serializer.validated_data['product']
         quantity = serializer.validated_data['quantity']
 
-        cart = get_or_create_cart(request.user)
+        cart = get_or_create_cart_for_request(request)
+        if cart is None:
+            return Response({'error': 'Login required or X-Session-Key header missing.'}, status=status.HTTP_400_BAD_REQUEST)
 
         cart_item, created = CartItem.objects.get_or_create(
             cart=cart, product=product,
@@ -70,10 +94,13 @@ class AddToCartView(APIView):
 
 class UpdateCartItemView(APIView):
     """PUT /api/v1/cart/update/{item_id}/"""
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.AllowAny]
 
     def put(self, request, item_id):
-        cart = get_or_create_cart(request.user)
+        cart = get_or_create_cart_for_request(request)
+        if cart is None:
+            return Response({'error': 'Login required or X-Session-Key header missing.'}, status=status.HTTP_400_BAD_REQUEST)
+
         try:
             cart_item = cart.items.get(id=item_id)
         except CartItem.DoesNotExist:
@@ -102,10 +129,13 @@ class UpdateCartItemView(APIView):
 
 class RemoveCartItemView(APIView):
     """DELETE /api/v1/cart/remove/{item_id}/"""
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.AllowAny]
 
     def delete(self, request, item_id):
-        cart = get_or_create_cart(request.user)
+        cart = get_or_create_cart_for_request(request)
+        if cart is None:
+            return Response({'error': 'Login required or X-Session-Key header missing.'}, status=status.HTTP_400_BAD_REQUEST)
+
         try:
             cart_item = cart.items.get(id=item_id)
         except CartItem.DoesNotExist:
@@ -119,10 +149,13 @@ class RemoveCartItemView(APIView):
 
 class ClearCartView(APIView):
     """DELETE /api/v1/cart/clear/"""
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.AllowAny]
 
     def delete(self, request):
-        cart = get_or_create_cart(request.user)
+        cart = get_or_create_cart_for_request(request)
+        if cart is None:
+            return Response({'error': 'Login required or X-Session-Key header missing.'}, status=status.HTTP_400_BAD_REQUEST)
+
         cart.items.all().delete()
         cart.coupon = None
         cart.save()
@@ -131,7 +164,7 @@ class ClearCartView(APIView):
 
 class ApplyCouponView(APIView):
     """POST /api/v1/cart/apply-coupon/"""
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.AllowAny]
 
     def post(self, request):
         serializer = ApplyCouponSerializer(data=request.data)
@@ -147,7 +180,10 @@ class ApplyCouponView(APIView):
         if not (discount.start_date <= now <= discount.end_date):
             return Response({'error': 'This coupon has expired or is not active yet.'}, status=status.HTTP_400_BAD_REQUEST)
 
-        cart = get_or_create_cart(request.user)
+        cart = get_or_create_cart_for_request(request)
+        if cart is None:
+            return Response({'error': 'Login required or X-Session-Key header missing.'}, status=status.HTTP_400_BAD_REQUEST)
+
         subtotal = sum(item.product.price * item.quantity for item in cart.items.all())
 
         if discount.min_order_amount and subtotal < discount.min_order_amount:
@@ -171,10 +207,13 @@ class ApplyCouponView(APIView):
 
 class RemoveCouponView(APIView):
     """DELETE /api/v1/cart/remove-coupon/"""
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.AllowAny]
 
     def delete(self, request):
-        cart = get_or_create_cart(request.user)
+        cart = get_or_create_cart_for_request(request)
+        if cart is None:
+            return Response({'error': 'Login required or X-Session-Key header missing.'}, status=status.HTTP_400_BAD_REQUEST)
+
         cart.coupon = None
         cart.save()
         # FIX: was returning the ENTIRE cart object; doc (API 38) only
