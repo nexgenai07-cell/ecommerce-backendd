@@ -188,3 +188,11 @@ class TwoFactorLoginVerifyView(APIView):
             'user': UserProfileSerializer(user).data,
             'tokens': tokens,
         }, status=status.HTTP_200_OK)
+        
+#This file implements the complete Two-Factor Authentication (2FA) system. It
+# allows users to enable 2FA by generating a unique secret key and QR code, 
+# verifies OTPs to activate security, provides an option to disable 2FA after
+# password confirmation, and completes the login process by validating the OTP
+# before issuing JWT tokens. This adds an extra layer of security, ensuring 
+# that even if a password is compromised, an attacker cannot log in without 
+# the user's authenticator-generated code.

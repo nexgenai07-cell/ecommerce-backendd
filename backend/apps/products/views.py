@@ -23,7 +23,9 @@ from .serializers import (
 from apps.users.permissions import IsAdmin
 from core.pagination import StandardResultsPagination
 
-
+# Main controller for all Product APIs.
+# Main controller that manages all Product APIs including CRUD,
+# search, image management, and stock operations.
 class ProductViewSet(viewsets.ModelViewSet):
     """
     GET    /api/v1/products/             -> list (anyone)
@@ -52,6 +54,9 @@ class ProductViewSet(viewsets.ModelViewSet):
     # manually paginate_queryset() call karke lagaya gaya hai.
     pagination_class = StandardResultsPagination
 
+# Returns products based on the current API action and user role.
+# Returns products based on the current user and requested action.
+# Customers only see active products while admins can access all products.
     def get_queryset(self):
         qs = Product.objects.select_related('category').prefetch_related('images')
         if self.action in ['list', 'retrieve', 'search']:
@@ -60,6 +65,7 @@ class ProductViewSet(viewsets.ModelViewSet):
                 qs = qs.filter(is_active=True)
         return qs
 
+# Selects the appropriate serializer for each API endpoint.
     def get_serializer_class(self):
         if self.action == 'list' or self.action == 'search':
             return ProductListSerializer
@@ -69,16 +75,19 @@ class ProductViewSet(viewsets.ModelViewSet):
             return StockAdjustSerializer
         return ProductDetailSerializer
 
+# Applies permissions based on the requested action.
     def get_permissions(self):
         if self.action in ['list', 'retrieve', 'search']:
             return [permissions.AllowAny()]
         return [permissions.IsAuthenticated(), IsAdmin()]
 
+# Soft deletes a product by marking it as inactive.
     def perform_destroy(self, instance):
         # Soft delete — data is never actually removed
         instance.is_active = False
         instance.save()
 
+# Updates product information and records changes in product history.
     def update(self, request, *args, **kwargs):
         instance = self.get_object()
 
@@ -118,6 +127,7 @@ class ProductViewSet(viewsets.ModelViewSet):
 
         return Response(serializer.data)
 
+# Searches products using filters like name, category, price, stock, and ordering.
     @action(detail=False, methods=['get'], url_path='search')
     def search(self, request):
         """
@@ -180,6 +190,10 @@ class ProductViewSet(viewsets.ModelViewSet):
         serializer = ProductListSerializer(qs, many=True)
         return Response(serializer.data)
 
+
+# Returns products that have reached or fallen below their stock threshold.
+# Returns all products whose stock has reached
+# or fallen below the low stock threshold.
     @action(detail=False, methods=['get'], url_path='low-stock',
             permission_classes=[permissions.IsAuthenticated, IsAdmin])
     def low_stock(self, request):
@@ -201,6 +215,7 @@ class ProductViewSet(viewsets.ModelViewSet):
         serializer = LowStockProductSerializer(low_stock_products, many=True)
         return Response(serializer.data)
 
+# Uploads a new image for the selected product.
     @action(detail=True, methods=['post'], url_path='images',
             permission_classes=[permissions.IsAuthenticated, IsAdmin],
             parser_classes=[MultiPartParser, FormParser])
@@ -225,6 +240,7 @@ class ProductViewSet(viewsets.ModelViewSet):
             status=status.HTTP_201_CREATED,
         )
 
+# Deletes a product image and assigns a new primary image if needed.
     @action(detail=True, methods=['delete'], url_path='images/(?P<image_id>[^/.]+)',
             permission_classes=[permissions.IsAuthenticated, IsAdmin])
     def delete_image(self, request, pk=None, image_id=None):
@@ -248,6 +264,7 @@ class ProductViewSet(viewsets.ModelViewSet):
         return Response(status=status.HTTP_204_NO_CONTENT)
     
 
+# Safely increases or decreases product stock using the stock adjustment service.
     @action(
         detail=True,
         methods=["post"],
@@ -270,7 +287,7 @@ class ProductViewSet(viewsets.ModelViewSet):
 
         return Response(result)
 
-
+# Sets the selected image as the primary product image.
     @action(
         detail=True,
         methods=['put'],

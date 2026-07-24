@@ -55,7 +55,7 @@ class CreateReturnView(APIView):
 
         return Response(ReturnSerializer(return_request).data, status=status.HTTP_201_CREATED)
 
-
+# Returns a list of return requests.
 class ReturnListView(generics.ListAPIView):
     """
     GET /api/v1/returns/ — customer sees own, admin sees all
@@ -75,7 +75,7 @@ class ReturnListView(generics.ListAPIView):
             return Return.objects.all().order_by('-created_at')
         return Return.objects.filter(customer__user=user).order_by('-created_at')
 
-
+# Returns details of a single return request.
 class ReturnDetailView(generics.RetrieveAPIView):
     """GET /api/v1/returns/{id}/"""
     serializer_class = ReturnSerializer
@@ -87,7 +87,7 @@ class ReturnDetailView(generics.RetrieveAPIView):
             return Return.objects.all()
         return Return.objects.filter(customer__user=user)
 
-
+# Allows admin to approve or reject return requests.
 class AdminReturnStatusUpdateView(APIView):
     """
     PUT /api/v1/admin/returns/{id}/status/
